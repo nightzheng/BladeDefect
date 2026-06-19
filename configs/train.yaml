@@ -1,0 +1,14 @@
+model: yolo11n-seg.pt
+data: configs/data.yaml
+epochs: 100
+imgsz: 640
+batch: 8
+device: 0
+workers: 4
+project: runs/segment
+name: blade_yolo11n
+patience: 30
+seed: 42
+pretrained: true
+cache: false
+amp: true

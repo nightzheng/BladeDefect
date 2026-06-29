@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from blade_defect.utils.files import load_yaml, save_json
+from blade_defect.utils.paths import resolve_config_paths, resolve_model_reference, resolve_path
 
 ExperimentFn = Callable[[str, dict[str, Any]], dict[str, Any]]
 
@@ -15,9 +16,27 @@ ExperimentFn = Callable[[str, dict[str, Any]], dict[str, Any]]
 class AblationRunner:
     """Run named parameter overrides through an injectable experiment function."""
 
-    def __init__(self, config_path: str | Path, output_dir: str | Path = "runs/ablation_summary") -> None:
-        self.config = load_yaml(config_path)
-        self.output_dir = Path(output_dir)
+    def __init__(
+        self,
+        config_path: str | Path,
+        output_dir: str | Path = "runs/ablation_summary",
+        device: str | int | None = None,
+    ) -> None:
+        self.config_path = resolve_path(config_path)
+        raw_config = load_yaml(self.config_path)
+        project_root_value = raw_config.get("project_root", ".")
+        self.project_root = resolve_path(project_root_value, self.config_path.parent)
+        base_config = {
+            "project_root": self.project_root,
+            **raw_config.get("base", {}),
+        }
+        base, _ = resolve_config_paths(base_config, self.config_path, ("data", "project"))
+        if "model" in base:
+            base["model"] = resolve_model_reference(base["model"], self.project_root)
+        self.config = {**raw_config, "base": base}
+        self.config.pop("project_root", None)
+        self.output_dir = resolve_path(output_dir)
+        self.device = device
 
     def build_experiments(self) -> list[tuple[str, dict[str, Any]]]:
         base = self.config.get("base", {})
@@ -25,6 +44,8 @@ class AblationRunner:
         for item in self.config.get("experiments", []):
             params = deepcopy(base)
             params.update(item.get("overrides", {}))
+            if self.device is not None:
+                params["device"] = self.device
             experiments.append((item["name"], params))
         return experiments
 

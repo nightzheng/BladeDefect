@@ -6,7 +6,8 @@ import random
 import shutil
 from pathlib import Path
 
-from blade_defect.utils.files import find_images
+from blade_defect.utils.files import find_images, find_labels
+from blade_defect.utils.paths import resolve_path
 
 
 def split_dataset(
@@ -20,12 +21,20 @@ def split_dataset(
     if len(ratios) != 3 or any(value < 0 for value in ratios) or abs(sum(ratios) - 1.0) > 1e-8:
         raise ValueError("ratios 必须是和为 1 的 train/val/test 三元组")
 
-    images_root, labels_root, output_root = Path(images_dir), Path(labels_dir), Path(output_dir)
+    images_root = resolve_path(images_dir)
+    labels_root = resolve_path(labels_dir)
+    output_root = resolve_path(output_dir)
+    labels_by_key = {
+        path.relative_to(labels_root).with_suffix("").as_posix().casefold(): path
+        for path in find_labels(labels_root)
+    }
     pairs: list[tuple[Path, Path]] = []
-    for image_path in find_images(images_root):
+    images = find_images(images_root)
+    for image_path in images:
         relative = image_path.relative_to(images_root)
-        label_path = labels_root / relative.with_suffix(".txt")
-        if label_path.exists():
+        key = relative.with_suffix("").as_posix().casefold()
+        label_path = labels_by_key.get(key)
+        if label_path is not None:
             pairs.append((image_path, label_path))
 
     random.Random(seed).shuffle(pairs)
@@ -43,4 +52,6 @@ def split_dataset(
             label_target.parent.mkdir(parents=True, exist_ok=True)
             operation(image_path, image_target)
             operation(label_path, label_target)
-    return {name: len(items) for name, items in groups.items()}
+    counts = {name: len(items) for name, items in groups.items()}
+    counts["unmatched_images"] = len(images) - len(pairs)
+    return counts

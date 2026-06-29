@@ -6,10 +6,11 @@ import argparse
 import json
 
 from blade_defect.data import check_dataset
+from blade_defect.utils import resolve_path
 
 parser = argparse.ArgumentParser()
-parser.add_argument("--images", required=True)
-parser.add_argument("--labels", required=True)
+parser.add_argument("--images", required=True, type=resolve_path)
+parser.add_argument("--labels", required=True, type=resolve_path)
 parser.add_argument("--num-classes", type=int)
 args = parser.parse_args()
 

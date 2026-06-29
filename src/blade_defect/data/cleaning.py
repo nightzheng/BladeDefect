@@ -8,7 +8,8 @@ from pathlib import Path
 
 from PIL import Image, UnidentifiedImageError
 
-from blade_defect.utils.files import find_images
+from blade_defect.utils.files import find_images, find_labels
+from blade_defect.utils.paths import resolve_path
 
 
 @dataclass
@@ -29,7 +30,7 @@ def _sha256(path: Path) -> str:
 
 def clean_dataset(images_dir: str | Path, labels_dir: str | Path) -> CleaningReport:
     """Scan for common problems without deleting user data."""
-    images_root, labels_root = Path(images_dir), Path(labels_dir)
+    images_root, labels_root = resolve_path(images_dir), resolve_path(labels_dir)
     report = CleaningReport()
     hashes: dict[str, Path] = {}
 
@@ -47,7 +48,7 @@ def clean_dataset(images_dir: str | Path, labels_dir: str | Path) -> CleaningRep
         else:
             hashes[digest] = image_path
 
-    for label_path in labels_root.rglob("*.txt"):
+    for label_path in find_labels(labels_root):
         if not label_path.read_text(encoding="utf-8").strip():
             report.empty_labels.append(str(label_path))
     return report

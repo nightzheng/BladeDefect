@@ -1,10 +1,11 @@
+project_root: ..
 base:
   model: yolo11n-seg.pt
   data: configs/data.yaml
   epochs: 50
   imgsz: 640
   batch: 8
-  device: 0
+  device: auto
   project: runs/ablation
   seed: 42
 

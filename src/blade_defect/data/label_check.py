@@ -5,7 +5,8 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
-from blade_defect.utils.files import find_images
+from blade_defect.utils.files import find_images, find_labels
+from blade_defect.utils.paths import resolve_path
 
 
 @dataclass
@@ -63,18 +64,30 @@ def check_dataset(
     labels_dir: str | Path,
     num_classes: int | None = None,
 ) -> DatasetCheckReport:
-    images_root, labels_root = Path(images_dir), Path(labels_dir)
+    images_root, labels_root = resolve_path(images_dir), resolve_path(labels_dir)
     images = find_images(images_root)
-    labels = sorted(labels_root.rglob("*.txt"))
+    labels = find_labels(labels_root)
     report = DatasetCheckReport(images=len(images), labels=len(labels))
 
-    image_keys = {path.relative_to(images_root).with_suffix("") for path in images}
-    label_keys = {path.relative_to(labels_root).with_suffix("") for path in labels}
-    report.missing_labels = [str(key) for key in sorted(image_keys - label_keys)]
-    report.orphan_labels = [str(key) for key in sorted(label_keys - image_keys)]
+    image_keys = {
+        path.relative_to(images_root).with_suffix("").as_posix().casefold(): path
+        for path in images
+    }
+    label_keys = {
+        path.relative_to(labels_root).with_suffix("").as_posix().casefold(): path
+        for path in labels
+    }
+    report.missing_labels = [
+        image_keys[key].relative_to(images_root).with_suffix("").as_posix()
+        for key in sorted(image_keys.keys() - label_keys.keys())
+    ]
+    report.orphan_labels = [
+        label_keys[key].relative_to(labels_root).with_suffix("").as_posix()
+        for key in sorted(label_keys.keys() - image_keys.keys())
+    ]
 
     for label_path in labels:
-        relative = str(label_path.relative_to(labels_root))
+        relative = label_path.relative_to(labels_root).as_posix()
         for line_number, raw_line in enumerate(label_path.read_text(encoding="utf-8").splitlines(), 1):
             line = raw_line.strip()
             if not line:

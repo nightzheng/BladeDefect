@@ -11,7 +11,9 @@ def test_valid_segmentation_line() -> None:
 
 
 def test_invalid_coordinate() -> None:
-    assert "[0, 1]" in validate_seg_line("0 0.1 0.1 1.2 0.1 0.5 0.5")
+    message = validate_seg_line("0 0.1 0.1 1.2 0.1 0.5 0.5")
+    assert message is not None
+    assert "[0, 1]" in message
 
 
 def test_invalid_class() -> None:

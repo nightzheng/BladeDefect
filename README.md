@@ -29,8 +29,8 @@ Conda 环境固定使用 Python 3.10。默认配置使用 `device: auto`：CUDA 
 设置 `device: 0` / `device: cpu` 显式指定。
 
 `environment.yml` 不强行锁死 CUDA 版 PyTorch。GPU 用户应根据本机驱动和 CUDA 支持安装匹配的
-PyTorch；完整的 Windows、Linux、VSCode 和学校算力服务器配置说明见
-[docs/ENVIRONMENT.md](docs/ENVIRONMENT.md)。
+PyTorch；国内网络环境可使用阿里云镜像安装固定的 CUDA 12.8 版本。完整命令及 Windows、Linux、
+VSCode 和学校算力服务器配置说明见 [docs/ENVIRONMENT.md](docs/ENVIRONMENT.md#pytorch-与-cuda)。
 
 ## 跨平台路径与配置
 

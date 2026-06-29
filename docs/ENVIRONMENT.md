@@ -58,6 +58,16 @@ Windows 本地可尝试：
 conda install pytorch torchvision torchaudio pytorch-cuda=12.4 -c pytorch -c nvidia
 ```
 
+如果 NVIDIA 驱动支持 CUDA 12.8，也可通过阿里云 PyTorch Wheels 镜像安装固定版本，以改善国内网络
+环境下的下载稳定性：
+
+```powershell
+python -m pip install torch==2.9.0+cu128 torchvision==0.24.0+cu128 torchaudio==2.9.0+cu128 --find-links https://mirrors.aliyun.com/pytorch-wheels/cu128/ --no-index --timeout 1000 --retries 20 --no-cache-dir
+```
+
+该命令仅从指定镜像查找安装包，并固定为 CUDA 12.8 版本；执行前应确认 NVIDIA 驱动兼容 CUDA
+12.8。CPU 环境或使用其他 CUDA 版本的机器不应直接套用此命令。
+
 如果 CUDA 12.4 组合不稳定，可尝试：
 
 ```powershell

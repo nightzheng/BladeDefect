@@ -51,6 +51,16 @@ device: auto
 
 数据集采用 Ultralytics YOLO-seg 格式：
 
+当前数据集包含 15 类风机叶片缺陷（类别 ID 为 0-14），完整类别名称以
+[`configs/data.yaml`](configs/data.yaml) 为准。类别按缺陷性质分为：
+
+- 表面腐蚀：0-3
+- 表面裂纹：4-5
+- 表面缺陷：6-9
+- 维修痕迹：10
+- 叶片损伤：11-13
+- 附件脱落：14
+
 ```text
 datasets/blade/
 ├── images/

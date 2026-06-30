@@ -216,3 +216,17 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# BladeDefect local data and generated artifacts
+datasets/
+runs/
+labels_backup_*/
+*.pt
+*.onnx
+*.engine
+
+# Local editor and operating-system files
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db

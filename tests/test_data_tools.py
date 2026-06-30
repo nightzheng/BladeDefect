@@ -85,6 +85,7 @@ def test_create_small_dataset_copies_only_pairs_and_writes_config(tmp_path: Path
 
 def test_valid_segmentation_line() -> None:
     assert validate_seg_line("0 0.1 0.1 0.5 0.1 0.5 0.5", num_classes=2) is None
+    assert validate_seg_line("14 0 0 1 0 1 1 0.5 0.75 0 1", num_classes=15) is None
 
 
 def test_invalid_coordinate() -> None:
@@ -97,6 +98,109 @@ def test_invalid_class() -> None:
     message = validate_seg_line("2 0.1 0.1 0.5 0.1 0.5 0.5", num_classes=2)
     assert message is not None
     assert "class_id=2" in message
+
+
+def test_label_report_distinguishes_bbox_polygon_and_empty_labels(tmp_path: Path) -> None:
+    images = tmp_path / "images"
+    labels = tmp_path / "labels"
+    images.mkdir()
+    labels.mkdir()
+    rows = {
+        "valid": "14 0 0 1 0 1 1 0 1\n",
+        "bbox": "0 0.5 0.5 0.2 0.2\n",
+        "odd": "0 0.1 0.1 0.5 0.1 0.5\n",
+        "range": "0 0.1 0.1 1.01 0.2 0.5 0.5\n",
+        "empty": "\n",
+    }
+    for name, row in rows.items():
+        (images / f"{name}.jpg").write_bytes(b"image")
+        (labels / f"{name}.txt").write_text(row, encoding="utf-8")
+
+    report = check_dataset(images, labels, num_classes=15)
+
+    assert report.valid_objects == 1
+    assert report.empty_labels == ["empty.txt"]
+    assert report.error_type_counts == {
+        "bbox_format": 1,
+        "polygon_coordinate_count": 1,
+        "polygon_coordinate_range": 1,
+    }
+    assert "第 2 个点" in next(issue.message for issue in report.issues if issue.error_type == "polygon_coordinate_range")
+    payload = report.to_dict()
+    assert payload["error_type_counts"] == report.error_type_counts
+
+
+def test_empty_label_is_recorded_without_becoming_an_error(tmp_path: Path) -> None:
+    images = tmp_path / "images"
+    labels = tmp_path / "labels"
+    images.mkdir()
+    labels.mkdir()
+    (images / "negative.jpg").write_bytes(b"image")
+    (labels / "negative.txt").write_text("\n", encoding="utf-8")
+
+    report = check_dataset(images, labels, num_classes=15)
+
+    assert report.empty_labels == ["negative.txt"]
+    assert report.valid
+    assert report.error_type_counts == {}
+
+
+def test_fix_float_clips_soft_errors_without_changing_class_id(tmp_path: Path) -> None:
+    images = tmp_path / "images"
+    labels = tmp_path / "labels"
+    images.mkdir()
+    labels.mkdir()
+    (images / "soft.jpg").write_bytes(b"image")
+    label = labels / "soft.txt"
+    label.write_text("14 -0.005 0.2 0.4 1.006 1 0.8\n", encoding="utf-8")
+
+    report = check_dataset(images, labels, num_classes=15, fix_float=True)
+
+    assert label.read_text(encoding="utf-8") == "14 0 0.2 0.4 1 1 0.8\n"
+    assert report.fixed_points == 2
+    assert report.fixed_files == 1
+    assert report.max_offset == pytest.approx(0.006)
+    assert report.fixes[0].status == "FIXED_FLOAT_ERROR"
+    assert report.issues == []
+    assert report.valid
+
+
+def test_fix_float_dry_run_reports_but_does_not_write(tmp_path: Path) -> None:
+    images = tmp_path / "images"
+    labels = tmp_path / "labels"
+    images.mkdir()
+    labels.mkdir()
+    (images / "soft.jpg").write_bytes(b"image")
+    label = labels / "soft.txt"
+    original = "0 0.1 0.1 1.001 0.2 0.5 0.5\n"
+    label.write_text(original, encoding="utf-8")
+
+    report = check_dataset(images, labels, fix_float=True, dry_run=True)
+
+    assert label.read_text(encoding="utf-8") == original
+    assert report.fixed_points == 1
+    assert report.fixed_files == 1
+    assert report.dry_run
+    assert report.fixes[0].status == "FIXED_FLOAT_ERROR"
+
+
+def test_fix_float_does_not_modify_hard_errors(tmp_path: Path) -> None:
+    images = tmp_path / "images"
+    labels = tmp_path / "labels"
+    images.mkdir()
+    labels.mkdir()
+    (images / "hard.jpg").write_bytes(b"image")
+    label = labels / "hard.txt"
+    original = "0 0.1 0.1 1.02 0.2 0.5 0.5\n"
+    label.write_text(original, encoding="utf-8")
+
+    report = check_dataset(images, labels, fix_float=True)
+
+    assert label.read_text(encoding="utf-8") == original
+    assert report.fixed_points == 0
+    assert report.fixed_files == 0
+    assert report.issues[0].status == "HARD_ERROR"
+    assert not report.valid
 
 
 def test_uppercase_extensions_and_case_insensitive_pairing(tmp_path: Path) -> None:

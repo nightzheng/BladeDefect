@@ -1,5 +1,5 @@
 # 修改为实际数据集根目录；可使用绝对路径或相对此文件的路径。
-path: ../datasets/blade
+path: ../datasets/blade-small
 train: images/train
 val: images/val
 test: images/test

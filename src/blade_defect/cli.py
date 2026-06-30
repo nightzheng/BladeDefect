@@ -43,10 +43,16 @@ def build_parser() -> argparse.ArgumentParser:
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     check = subparsers.add_parser("check-labels")
-    check.add_argument("--images", required=True, type=resolve_path)
-    check.add_argument("--labels", required=True, type=resolve_path)
+    check.add_argument("--images", default="datasets/raw/images", type=resolve_path)
+    check.add_argument("--labels", default="datasets/raw/labels", type=resolve_path)
     check.add_argument("--num-classes", type=int)
     check.add_argument("--output", default="runs/data_check.json", type=resolve_path)
+    check.add_argument("--dry-run", action="store_true", help="仅输出检查结果，不写入 JSON 报告")
+    check.add_argument(
+        "--fix-float",
+        action="store_true",
+        help="将 [-0.01, 1.01] 内的轻微坐标越界 clip 到 [0, 1]",
+    )
 
     clean = subparsers.add_parser("clean")
     clean.add_argument("--images", required=True, type=resolve_path)
@@ -90,8 +96,15 @@ def main() -> None:
     setup_logging()
     args = build_parser().parse_args()
     if args.command == "check-labels":
-        report = check_dataset(args.images, args.labels, args.num_classes)
-        save_json(report.to_dict(), args.output)
+        report = check_dataset(
+            args.images,
+            args.labels,
+            args.num_classes,
+            fix_float=args.fix_float,
+            dry_run=args.dry_run,
+        )
+        if not args.dry_run:
+            save_json(report.to_dict(), args.output)
         print(json.dumps(report.to_dict(), ensure_ascii=False, indent=2))
     elif args.command == "clean":
         report = clean_dataset(args.images, args.labels)

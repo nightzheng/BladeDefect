@@ -7,6 +7,9 @@ channels:
 dependencies:
   - python=3.10
   - pip
+  # Keep Conda numerical packages on OpenBLAS so they do not load LLVM OpenMP
+  # alongside the Intel OpenMP runtime bundled with pip PyTorch on Windows.
+  - "libblas=*=*openblas"
   - numpy
   - pandas
   - pyyaml

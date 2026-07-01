@@ -220,6 +220,9 @@ __marimo__/
 # BladeDefect local data and generated artifacts
 datasets/
 runs/
+results/
+# Legacy temporary dataset YAML files from experiment runs.
+tmp*.yaml
 labels_backup_*/
 *.pt
 *.onnx

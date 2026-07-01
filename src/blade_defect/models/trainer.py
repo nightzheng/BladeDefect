@@ -29,8 +29,13 @@ class SegmentationTrainer:
         model = config.pop("model", "yolo11n-seg.pt")
         return cls(resolve_model_reference(model, project_root)), config
 
-    def train(self, **kwargs: Any) -> Any:
-        """Train a segmentation model. Keyword arguments map to YOLO.train."""
+    def train(self, *, normalize_data_yaml: bool = True, **kwargs: Any) -> Any:
+        """Train a segmentation model. Keyword arguments map to YOLO.train.
+
+        ``normalize_data_yaml`` remains enabled for the standalone training
+        workflow. Experiment runs disable it so Ultralytics reads the original
+        dataset YAML referenced by ``configs/train.yaml`` directly.
+        """
         kwargs = {key: value for key, value in kwargs.items() if value is not None}
         kwargs["device"] = resolve_device(kwargs.get("device", "auto"))
         if isinstance(kwargs.get("project"), Path):
@@ -38,11 +43,18 @@ class SegmentationTrainer:
         data = kwargs.pop("data", None)
         if data is None:
             return self.model.train(task="segment", **kwargs)
+        if not normalize_data_yaml:
+            return self.model.train(data=str(resolve_path(data)), task="segment", **kwargs)
         with resolved_data_yaml(data) as normalized_data:
             return self.model.train(data=normalized_data, task="segment", **kwargs)
 
-    def validate(self, data: str | Path, device: str | int | None = "auto", **kwargs: Any) -> Any:
+    def validate(
+        self, data: str | Path, device: str | int | None = "auto", *,
+        normalize_data_yaml: bool = True, **kwargs: Any,
+    ) -> Any:
         kwargs["device"] = resolve_device(device)
+        if not normalize_data_yaml:
+            return self.model.val(data=str(resolve_path(data)), task="segment", **kwargs)
         with resolved_data_yaml(resolve_path(data)) as normalized_data:
             return self.model.val(data=normalized_data, task="segment", **kwargs)
 

@@ -1,9 +1,14 @@
 import csv
 import json
 from pathlib import Path
+from types import SimpleNamespace
+
+import pytest
 
 from blade_defect.cli import build_parser
 from blade_defect.experiment import EXPERIMENTS, analyze_experiments, export_summary
+from blade_defect.experiment.config import ExperimentConfig
+from blade_defect.experiment import runner as runner_module
 
 
 def test_registry_contains_expected_baselines() -> None:
@@ -29,7 +34,9 @@ def test_export_summary(tmp_path: Path) -> None:
 
 
 def test_experiment_cli_commands_parse() -> None:
-    assert build_parser().parse_args(["experiment", "run-all"]).experiment_command == "run-all"
+    run_all = build_parser().parse_args(["experiment", "run-all"])
+    assert run_all.experiment_command == "run-all"
+    assert run_all.config.name == "train.yaml"
     assert build_parser().parse_args(["experiment", "summary"]).experiment_command == "summary"
     assert build_parser().parse_args(["experiment", "analyze"]).experiment_command == "analyze"
 
@@ -58,3 +65,41 @@ def test_analyze_experiments_generates_publication_plots(tmp_path: Path) -> None
         "loss_curve_comparison.png",
     }
     assert all(path.stat().st_size > 0 for path in outputs)
+
+
+def test_run_all_uses_original_dataset_yaml(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    data = tmp_path / "data.yaml"
+    data.write_text("train: images/train\nval: images/val\nnames: [defect]\n", encoding="utf-8")
+    config = tmp_path / "train.yaml"
+    config.write_text(f"data: {data.as_posix()}\nworkers: 2\n", encoding="utf-8")
+    calls: list[tuple[str, dict[str, object]]] = []
+
+    class FakeTrainer:
+        def __init__(self, model: object) -> None:
+            calls.append(("init", {"model": model}))
+
+        def train(self, **kwargs: object) -> object:
+            calls.append(("train", kwargs))
+            return SimpleNamespace(save_dir=tmp_path / "runs" / "exp_test")
+
+        def validate(self, data: Path, **kwargs: object) -> object:
+            calls.append(("validate", {"data": data, **kwargs}))
+            metrics = SimpleNamespace(p=0.8, r=0.7, map50=0.6, map=0.5)
+            return SimpleNamespace(seg=metrics, speed={"inference": 10.0})
+
+    monkeypatch.setattr(runner_module, "SegmentationTrainer", FakeTrainer)
+    experiment = ExperimentConfig("exp_test", "model.pt", epochs=1)
+    runner_module.run_all_experiments(
+        [experiment], config=config, runs_dir=tmp_path / "runs",
+        results_file=tmp_path / "results" / "summary.csv", continue_on_error=False,
+    )
+
+    train_call = next(payload for kind, payload in calls if kind == "train")
+    validate_call = next(payload for kind, payload in calls if kind == "validate")
+    assert train_call["data"] == data.resolve()
+    assert train_call["normalize_data_yaml"] is False
+    assert train_call["workers"] == 2
+    assert validate_call["data"] == data.resolve()
+    assert validate_call["normalize_data_yaml"] is False

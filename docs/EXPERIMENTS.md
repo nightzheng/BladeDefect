@@ -15,7 +15,7 @@ blade-defect experiment run-all
 
 ```powershell
 blade-defect experiment run-all `
-  --data configs/data.yaml `
+  --config configs/train.yaml `
   --device 0 `
   --runs-dir runs `
   --output results/summary.csv
@@ -23,7 +23,8 @@ blade-defect experiment run-all `
 
 Linux shell 使用反斜杠 `\` 续行，或将命令写在同一行。
 
-每个实验输出到 `runs/<experiment_name>/`，最终指标写入 `metrics.json`。
+`run-all` 统一读取 `configs/train.yaml`，所有实验共用其中引用的原始 dataset YAML；
+该流程不会生成临时 dataset YAML。每个实验输出到 `runs/<experiment_name>/`，最终指标写入 `metrics.json`。
 完成全部实验后自动生成 `results/summary.csv`，字段为模型、mAP50、mAP50-95、
 Precision、Recall 和 FPS。已有结果可以重新汇总：
 

@@ -93,7 +93,7 @@ def build_parser() -> argparse.ArgumentParser:
     experiment = subparsers.add_parser("experiment", help="运行、汇总和分析 baseline 实验")
     experiment_commands = experiment.add_subparsers(dest="experiment_command", required=True)
     run_all = experiment_commands.add_parser("run-all", help="顺序运行全部注册实验")
-    run_all.add_argument("--data", default="configs/data.yaml", type=resolve_path)
+    run_all.add_argument("--config", default="configs/train.yaml", type=resolve_path)
     run_all.add_argument("--runs-dir", default="runs", type=resolve_path)
     run_all.add_argument("--output", default="results/summary.csv", type=resolve_path)
     run_all.add_argument("--device", default="auto", choices=("auto", "0", "cpu"))
@@ -153,7 +153,7 @@ def main() -> None:
         runner.run(_ablation_experiment)
     elif args.command == "experiment":
         if args.experiment_command == "run-all":
-            records = run_all_experiments(data=args.data, runs_dir=args.runs_dir,
+            records = run_all_experiments(config=args.config, runs_dir=args.runs_dir,
                                           results_file=args.output, device=args.device)
             print(json.dumps(records, ensure_ascii=False, indent=2))
         elif args.experiment_command == "summary":

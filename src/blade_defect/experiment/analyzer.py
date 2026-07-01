@@ -1,4 +1,4 @@
-"""Publication-ready plots for baseline experiment results."""
+"""为 baseline 实验结果生成论文级图表。"""
 
 from __future__ import annotations
 
@@ -22,7 +22,7 @@ _COLORS = ["#4472C4", "#ED7D31", "#70AD47", "#A5A5A5", "#5B9BD5", "#FFC000"]
 
 
 def _configure_matplotlib() -> None:
-    """Configure headless rendering and cross-platform Chinese font fallbacks."""
+    """配置无界面渲染和跨平台中文字体回退。"""
     plt.rcParams.update({
         "font.sans-serif": _FONT_FALLBACKS,
         "axes.unicode_minus": False,
@@ -40,7 +40,7 @@ def _float(value: Any) -> float:
 
 
 def _read_summary(path: Path) -> list[dict[str, Any]]:
-    """Load the comparison table and fail early on unusable input."""
+    """读取对比表，并在输入不可用时尽早报错。"""
     if not path.is_file():
         raise FileNotFoundError(f"Experiment summary not found: {path}")
     with path.open("r", encoding="utf-8-sig", newline="") as file:
@@ -67,7 +67,7 @@ def _bar(ax: Any, labels: list[str], values: list[float], title: str, ylabel: st
 
 
 def _save_summary_plot(rows: list[dict[str, Any]], output: Path) -> None:
-    """Write the four-panel overview used as the main paper figure."""
+    """生成可作为论文主图的四面板总览图。"""
     labels = _models(rows)
     map50 = [_float(row.get("mAP50")) for row in rows]
     map95 = [_float(row.get("mAP50-95")) for row in rows]
@@ -111,7 +111,7 @@ def _numeric_series(value: Any) -> list[float]:
 
 
 def _curves_from_metrics(path: Path) -> dict[str, list[float]]:
-    """Read optional curve arrays from either top-level or ``curves`` JSON data."""
+    """从 JSON 顶层或 ``curves`` 字段读取可选曲线数组。"""
     with path.open("r", encoding="utf-8") as file:
         payload = json.load(file)
     curves = payload.get("curves", payload)
@@ -133,15 +133,14 @@ def _curves_from_metrics(path: Path) -> dict[str, list[float]]:
 
 
 def _curves_from_results_csv(path: Path) -> dict[str, list[float]]:
-    """Normalize Ultralytics results.csv columns into analyzer curve names."""
+    """将 Ultralytics results.csv 列名归一化为分析器曲线名。"""
     with path.open("r", encoding="utf-8-sig", newline="") as file:
         rows = [{key.strip(): value for key, value in row.items()} for row in csv.DictReader(file)]
     if not rows:
         return {}
 
-    # Column names vary by Ultralytics version and task, but keep stable
-    # train/ or val/ prefixes and a loss suffix. Sum task-specific losses to
-    # obtain one comparable aggregate curve for each experiment.
+    # 不同 Ultralytics 版本的列名会变化，但 train/val 前缀和 loss 后缀较稳定；
+    # 将各任务 loss 求和，得到实验间可比较的聚合曲线。
     def columns(containing: tuple[str, ...]) -> list[str]:
         return [key for key in rows[0] if all(token in key.lower() for token in containing)]
 
@@ -159,7 +158,7 @@ def _curves_from_results_csv(path: Path) -> dict[str, list[float]]:
 
 
 def _load_run_data(runs_dir: Path) -> tuple[dict[str, dict[str, list[float]]], dict[str, float]]:
-    """Collect optional curves and class counts from all experiment folders."""
+    """从全部实验目录收集可选曲线和类别计数。"""
     curves: dict[str, dict[str, list[float]]] = {}
     distribution: dict[str, float] = {}
     if not runs_dir.exists():
@@ -177,7 +176,7 @@ def _load_run_data(runs_dir: Path) -> tuple[dict[str, dict[str, list[float]]], d
                     distribution[str(name)] = distribution.get(str(name), 0.0) + _float(count)
         results_csv = run_dir / "results.csv"
         if results_csv.is_file():
-            # Explicit JSON arrays override automatically discovered CSV data.
+            # 显式 JSON 曲线优先于自动识别的 CSV 曲线。
             run_curves = {**_curves_from_results_csv(results_csv), **run_curves}
         if run_curves:
             curves[run_dir.name] = run_curves
@@ -185,7 +184,7 @@ def _load_run_data(runs_dir: Path) -> tuple[dict[str, dict[str, list[float]]], d
 
 
 def _save_curve_plot(curves: dict[str, dict[str, list[float]]], output: Path) -> None:
-    """Plot loss and mAP histories, retaining a useful placeholder if absent."""
+    """绘制 loss 和 mAP 历史；数据缺失时保留说明占位图。"""
     fig, axes = plt.subplots(1, 2, figsize=(13, 5), constrained_layout=True)
     for index, (name, values) in enumerate(curves.items()):
         color = _COLORS[index % len(_COLORS)]
@@ -204,7 +203,7 @@ def _save_curve_plot(curves: dict[str, dict[str, list[float]]], output: Path) ->
         if ax.lines:
             ax.legend(fontsize=7)
         else:
-            # Preserve the output contract for old runs with scalar metrics only.
+            # 兼容只有最终标量指标的旧实验，同时保持输出文件约定。
             ax.text(0.5, 0.5, "No curve data available", ha="center", va="center",
                     transform=ax.transAxes)
     fig.savefig(output)
@@ -223,7 +222,7 @@ def analyze_experiments(
     summary: str | Path = "results/summary.csv", runs_dir: str | Path = "runs",
     output_dir: str | Path = "results/analysis",
 ) -> list[Path]:
-    """Generate comparison, PR, training-curve, and optional class plots."""
+    """生成模型对比、PR、训练曲线和可选类别分布图。"""
     _configure_matplotlib()
     rows = _read_summary(resolve_path(summary))
     runs_path, output = resolve_path(runs_dir), resolve_path(output_dir)

@@ -1,4 +1,4 @@
-"""Automated baseline experiment management."""
+"""自动化 baseline 实验管理。"""
 from .config import ExperimentConfig
 from .analyzer import analyze_experiments
 from .exporter import export_summary

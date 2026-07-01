@@ -1,4 +1,4 @@
-"""Export experiment metrics as a compact comparison table."""
+"""将实验指标导出为紧凑的对比表。"""
 from __future__ import annotations
 
 import csv
@@ -16,7 +16,7 @@ def _value(metrics: dict[str, Any], *names: str) -> Any:
 
 def export_summary(runs_dir: str | Path = "runs",
                    output: str | Path = "results/summary.csv") -> Path:
-    """Collect successful metrics.json files into a stable comparison CSV."""
+    """汇总成功实验的 metrics.json，生成字段稳定的对比 CSV。"""
     root, output_path = resolve_path(runs_dir), resolve_path(output)
     rows: list[dict[str, Any]] = []
     for metrics_path in sorted(root.glob("*/metrics.json")):

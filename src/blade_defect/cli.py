@@ -49,10 +49,19 @@ def build_parser() -> argparse.ArgumentParser:
     check.add_argument("--num-classes", type=int)
     check.add_argument("--output", default="runs/data_check.json", type=resolve_path)
     check.add_argument("--dry-run", action="store_true", help="仅输出检查结果，不写入 JSON 报告")
-    check.add_argument(
+    repair_mode = check.add_mutually_exclusive_group()
+    repair_mode.add_argument(
+        "--polygon-mode",
+        choices=("strict", "soft", "auto-fix"),
+        default="auto-fix",
+        help="polygon 越界处理模式（默认：auto-fix）",
+    )
+    repair_mode.add_argument(
         "--fix-float",
-        action="store_true",
-        help="将 [-0.01, 1.01] 内的轻微坐标越界 clip 到 [0, 1]",
+        dest="polygon_mode",
+        action="store_const",
+        const="auto-fix",
+        help="兼容旧参数；等同于 --polygon-mode auto-fix",
     )
 
     clean = subparsers.add_parser("clean")
@@ -97,6 +106,11 @@ def build_parser() -> argparse.ArgumentParser:
     run_all.add_argument("--runs-dir", default="runs", type=resolve_path)
     run_all.add_argument("--output", default="results/summary.csv", type=resolve_path)
     run_all.add_argument("--device", default="auto", choices=("auto", "0", "cpu"))
+    run_all.add_argument(
+        "--skip-validation",
+        action="store_true",
+        help="显式跳过训练前 strict dataset validation gate",
+    )
     summary = experiment_commands.add_parser("summary", help="重新生成实验汇总 CSV")
     summary.add_argument("--runs-dir", default="runs", type=resolve_path)
     summary.add_argument("--output", default="results/summary.csv", type=resolve_path)
@@ -115,7 +129,7 @@ def main() -> None:
             args.images,
             args.labels,
             args.num_classes,
-            fix_float=args.fix_float,
+            polygon_mode=args.polygon_mode,
             dry_run=args.dry_run,
         )
         if not args.dry_run:
@@ -154,7 +168,8 @@ def main() -> None:
     elif args.command == "experiment":
         if args.experiment_command == "run-all":
             records = run_all_experiments(config=args.config, runs_dir=args.runs_dir,
-                                          results_file=args.output, device=args.device)
+                                          results_file=args.output, device=args.device,
+                                          skip_validation=args.skip_validation)
             print(json.dumps(records, ensure_ascii=False, indent=2))
         elif args.experiment_command == "summary":
             print(export_summary(args.runs_dir, args.output))

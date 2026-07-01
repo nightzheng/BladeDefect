@@ -1,4 +1,4 @@
-"""Ultralytics YOLO segmentation training wrapper."""
+"""Ultralytics YOLO 分割模型训练封装。"""
 
 from __future__ import annotations
 
@@ -30,11 +30,10 @@ class SegmentationTrainer:
         return cls(resolve_model_reference(model, project_root)), config
 
     def train(self, *, normalize_data_yaml: bool = True, **kwargs: Any) -> Any:
-        """Train a segmentation model. Keyword arguments map to YOLO.train.
+        """训练分割模型，其余关键字参数会直接映射到 ``YOLO.train``。
 
-        ``normalize_data_yaml`` remains enabled for the standalone training
-        workflow. Experiment runs disable it so Ultralytics reads the original
-        dataset YAML referenced by ``configs/train.yaml`` directly.
+        独立训练默认启用 ``normalize_data_yaml``；实验系统会将其关闭，使
+        Ultralytics 直接读取 ``configs/train.yaml`` 引用的原始数据集 YAML。
         """
         kwargs = {key: value for key, value in kwargs.items() if value is not None}
         kwargs["device"] = resolve_device(kwargs.get("device", "auto"))

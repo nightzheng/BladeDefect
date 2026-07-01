@@ -1,4 +1,4 @@
-"""Built-in YOLO baseline experiment registry."""
+"""内置 YOLO baseline 实验注册表。"""
 from .config import ExperimentConfig
 
 EXPERIMENTS = [

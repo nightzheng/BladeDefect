@@ -94,6 +94,7 @@ def test_run_all_uses_original_dataset_yaml(
     runner_module.run_all_experiments(
         [experiment], config=config, runs_dir=tmp_path / "runs",
         results_file=tmp_path / "results" / "summary.csv", continue_on_error=False,
+        skip_validation=True,
     )
 
     train_call = next(payload for kind, payload in calls if kind == "train")
@@ -103,3 +104,43 @@ def test_run_all_uses_original_dataset_yaml(
     assert train_call["workers"] == 2
     assert validate_call["data"] == data.resolve()
     assert validate_call["normalize_data_yaml"] is False
+
+
+def test_run_all_validation_gate_stops_before_training(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    dataset = tmp_path / "dataset"
+    for split in ("train", "val"):
+        (dataset / "images" / split).mkdir(parents=True)
+        (dataset / "labels" / split).mkdir(parents=True)
+    # 孤立 label 在训练门禁中应按缺失图片处理。
+    (dataset / "labels" / "train" / "orphan.txt").write_text(
+        "0 0 0 1 0 1 1\n", encoding="utf-8"
+    )
+    data = tmp_path / "data.yaml"
+    data.write_text(
+        f"path: {dataset.as_posix()}\ntrain: images/train\nval: images/val\nnames: [defect]\n",
+        encoding="utf-8",
+    )
+    config = tmp_path / "train.yaml"
+    config.write_text(f"data: {data.as_posix()}\n", encoding="utf-8")
+
+    class UnexpectedTrainer:
+        def __init__(self, model: object) -> None:
+            raise AssertionError("training must not be initialized after validation failure")
+
+    monkeypatch.setattr(runner_module, "SegmentationTrainer", UnexpectedTrainer)
+    with pytest.raises(runner_module.DatasetValidationError, match="missing_images=1"):
+        runner_module.run_all_experiments(
+            [ExperimentConfig("blocked", "model.pt")],
+            config=config,
+            runs_dir=tmp_path / "runs",
+            results_file=tmp_path / "summary.csv",
+        )
+
+
+def test_run_all_cli_validation_is_enabled_by_default() -> None:
+    args = build_parser().parse_args(["experiment", "run-all"])
+    assert args.skip_validation is False
+    skipped = build_parser().parse_args(["experiment", "run-all", "--skip-validation"])
+    assert skipped.skip_validation is True

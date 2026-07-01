@@ -1,13 +1,21 @@
-"""YOLO segmentation annotation validation."""
+"""YOLO-seg 标注检查与 polygon 坐标修复。"""
 
 from __future__ import annotations
 
 from collections import Counter
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
+from typing import Literal
 
 from blade_defect.utils.files import find_images, find_labels
 from blade_defect.utils.paths import resolve_path
+
+PolygonRepairMode = Literal["strict", "soft", "auto-fix"]
+
+
+def clamp01(x: float) -> float:
+    """将归一化 polygon 坐标限制在闭区间 [0, 1]。"""
+    return min(1.0, max(0.0, x))
 
 
 @dataclass
@@ -31,8 +39,10 @@ class DatasetCheckReport:
     fixes: list[LabelIssue] = field(default_factory=list)
     fixed_points: int = 0
     fixed_files: int = 0
+    removed_files: int = 0
     max_offset: float = 0.0
     fix_float_enabled: bool = False
+    polygon_mode: PolygonRepairMode = "strict"
     dry_run: bool = False
 
     @property
@@ -72,7 +82,7 @@ class _LineResult:
 def _inspect_seg_line(
     line: str,
     num_classes: int | None = None,
-    fix_float: bool = False,
+    mode: PolygonRepairMode = "strict",
 ) -> _LineResult:
     parts = line.split()
     if not parts:
@@ -131,7 +141,7 @@ def _inspect_seg_line(
                 "且已超出 soft clip 范围 [-0.01, 1.01]",
             )
         )
-    if soft_points and not fix_float:
+    if soft_points and mode == "strict":
         point_number, x, y = soft_points[0]
         return _LineResult(
             error=_LineError(
@@ -143,7 +153,7 @@ def _inspect_seg_line(
         max_offset = 0.0
         clipped_coords: list[float] = []
         for coord_index, value in enumerate(coords, start=1):
-            clipped = min(1.0, max(0.0, value))
+            clipped = clamp01(value)
             clipped_coords.append(clipped)
             if clipped != value:
                 parts[coord_index] = "0" if clipped == 0.0 else "1"
@@ -169,7 +179,7 @@ def _validate_seg_line(line: str, num_classes: int | None = None) -> _LineError 
 
 
 def validate_seg_line(line: str, num_classes: int | None = None) -> str | None:
-    """Validate one ``class_id x1 y1 ... xn yn`` YOLO-seg row."""
+    """检查一行 ``class_id x1 y1 ... xn yn`` 格式的 YOLO-seg 标注。"""
     error = _validate_seg_line(line, num_classes)
     return error.message if error else None
 
@@ -178,16 +188,27 @@ def check_dataset(
     images_dir: str | Path,
     labels_dir: str | Path,
     num_classes: int | None = None,
-    fix_float: bool = False,
+    fix_float: bool | None = None,
     dry_run: bool = False,
+    polygon_mode: PolygonRepairMode | None = None,
 ) -> DatasetCheckReport:
+    """检查并按需修复 YOLO-seg 数据集。
+
+    ``fix_float`` 作为兼容参数保留：显式 ``True`` 对应 ``auto-fix``，
+    显式 ``False`` 对应 ``strict``，未传入时默认使用 ``auto-fix``。
+    """
+    if polygon_mode is None:
+        polygon_mode = "auto-fix" if fix_float is not False else "strict"
+    if polygon_mode not in {"strict", "soft", "auto-fix"}:
+        raise ValueError(f"Unsupported polygon repair mode: {polygon_mode}")
     images_root, labels_root = resolve_path(images_dir), resolve_path(labels_dir)
     images = find_images(images_root)
     labels = find_labels(labels_root)
     report = DatasetCheckReport(
         images=len(images),
         labels=len(labels),
-        fix_float_enabled=fix_float,
+        fix_float_enabled=polygon_mode != "strict",
+        polygon_mode=polygon_mode,
         dry_run=dry_run,
     )
 
@@ -217,11 +238,15 @@ def check_dataset(
         raw_lines = content.splitlines(keepends=True)
         updated_lines = list(raw_lines)
         file_fixed = False
+        file_fixed_points = 0
+        file_max_offset = 0.0
+        file_fixes: list[LabelIssue] = []
+        remove_sample = False
         for line_number, raw_line in enumerate(raw_lines, 1):
             line = raw_line.strip()
             if not line:
                 continue
-            result = _inspect_seg_line(line, num_classes, fix_float=fix_float)
+            result = _inspect_seg_line(line, num_classes, mode=polygon_mode)
             if result.error:
                 report.issues.append(
                     LabelIssue(
@@ -232,13 +257,18 @@ def check_dataset(
                         result.error.message,
                     )
                 )
+                if (
+                    polygon_mode == "auto-fix"
+                    and result.error.error_type == "polygon_coordinate_range"
+                ):
+                    remove_sample = True
             else:
                 report.valid_objects += 1
                 if result.fixed_line is not None:
                     file_fixed = True
-                    report.fixed_points += result.fixed_points
-                    report.max_offset = max(report.max_offset, result.max_offset)
-                    report.fixes.append(
+                    file_fixed_points += result.fixed_points
+                    file_max_offset = max(file_max_offset, result.max_offset)
+                    file_fixes.append(
                         LabelIssue(
                             relative,
                             line_number,
@@ -250,8 +280,19 @@ def check_dataset(
                     line_ending = "\r\n" if raw_line.endswith("\r\n") else "\n" if raw_line.endswith("\n") else ""
                     indentation = raw_line[: len(raw_line) - len(raw_line.lstrip())]
                     updated_lines[line_number - 1] = indentation + result.fixed_line + line_ending
-        if file_fixed:
+        if remove_sample:
+            report.removed_files += 1
+            if not dry_run:
+                label_path.unlink(missing_ok=True)
+                key = label_path.relative_to(labels_root).with_suffix("").as_posix().casefold()
+                image_path = image_keys.get(key)
+                if image_path is not None:
+                    image_path.unlink(missing_ok=True)
+        elif file_fixed:
             report.fixed_files += 1
+            report.fixed_points += file_fixed_points
+            report.max_offset = max(report.max_offset, file_max_offset)
+            report.fixes.extend(file_fixes)
             if not dry_run:
                 with label_path.open("w", encoding="utf-8", newline="") as file:
                     file.write("".join(updated_lines))

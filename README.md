@@ -1,5 +1,8 @@
 # BladeDefect
 
+> 自动化 baseline 实验、结果汇总与论文图表说明见
+> [docs/EXPERIMENTS.md](docs/EXPERIMENTS.md)。
+
 面向风机叶片无人机巡检的 YOLO segmentation 缺陷检测工程模板。项目支持
 Ultralytics YOLOv8/YOLO11 的训练、验证与推理，并为后续 RGB-T 配准和融合预留接口。
 
@@ -114,6 +117,15 @@ streamlit run src/blade_defect/app/streamlit_app.py
 
 # 执行示例消融实验
 blade-defect ablation --config configs/ablation.yaml
+
+# 顺序运行全部 YOLO baseline，并生成 results/summary.csv
+blade-defect experiment run-all
+
+# 从已有 runs 重新生成汇总
+blade-defect experiment summary
+
+# 生成 results/analysis 下的论文级图表
+blade-defect experiment analyze
 ```
 
 推理命令同时兼容原有的 `--model` 参数。`train`、`predict`、`evaluate` / `eval` 和 `ablation`

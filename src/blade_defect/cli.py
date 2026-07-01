@@ -9,6 +9,7 @@ from typing import Any
 
 from blade_defect.data import check_dataset, clean_dataset, split_dataset
 from blade_defect.evaluation import AblationRunner, metrics_from_ultralytics
+from blade_defect.experiment import analyze_experiments, export_summary, run_all_experiments
 from blade_defect.models import SegmentationPredictor, SegmentationTrainer
 from blade_defect.utils import resolve_model_reference, resolve_path, setup_logging
 from blade_defect.utils.files import save_json
@@ -89,6 +90,20 @@ def build_parser() -> argparse.ArgumentParser:
     ablation.add_argument("--config", default="configs/ablation.yaml", type=resolve_path)
     ablation.add_argument("--output", default="runs/ablation_summary", type=resolve_path)
     ablation.add_argument("--device", choices=("auto", "0", "cpu"), help="覆盖配置中的计算设备")
+    experiment = subparsers.add_parser("experiment", help="运行、汇总和分析 baseline 实验")
+    experiment_commands = experiment.add_subparsers(dest="experiment_command", required=True)
+    run_all = experiment_commands.add_parser("run-all", help="顺序运行全部注册实验")
+    run_all.add_argument("--data", default="configs/data.yaml", type=resolve_path)
+    run_all.add_argument("--runs-dir", default="runs", type=resolve_path)
+    run_all.add_argument("--output", default="results/summary.csv", type=resolve_path)
+    run_all.add_argument("--device", default="auto", choices=("auto", "0", "cpu"))
+    summary = experiment_commands.add_parser("summary", help="重新生成实验汇总 CSV")
+    summary.add_argument("--runs-dir", default="runs", type=resolve_path)
+    summary.add_argument("--output", default="results/summary.csv", type=resolve_path)
+    analyze = experiment_commands.add_parser("analyze", help="生成论文级统计图表")
+    analyze.add_argument("--summary", default="results/summary.csv", type=resolve_path)
+    analyze.add_argument("--runs-dir", default="runs", type=resolve_path)
+    analyze.add_argument("--output-dir", default="results/analysis", type=resolve_path)
     return parser
 
 
@@ -136,6 +151,16 @@ def main() -> None:
     elif args.command == "ablation":
         runner = AblationRunner(args.config, args.output, device=args.device)
         runner.run(_ablation_experiment)
+    elif args.command == "experiment":
+        if args.experiment_command == "run-all":
+            records = run_all_experiments(data=args.data, runs_dir=args.runs_dir,
+                                          results_file=args.output, device=args.device)
+            print(json.dumps(records, ensure_ascii=False, indent=2))
+        elif args.experiment_command == "summary":
+            print(export_summary(args.runs_dir, args.output))
+        elif args.experiment_command == "analyze":
+            outputs = analyze_experiments(args.summary, args.runs_dir, args.output_dir)
+            print(json.dumps([str(path) for path in outputs], ensure_ascii=False, indent=2))
 
 
 if __name__ == "__main__":

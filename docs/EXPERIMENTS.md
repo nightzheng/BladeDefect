@@ -99,11 +99,16 @@ YOLO 数据集需要同时满足三层正确性：
 |---|---|---|
 | L1 | 文件路径存在 | 缺失 image 或 label 的样本不进入抽样池 |
 | L2 | image/label 配对与 polygon 合法 | 轻微越界自动 clamp，不可修复样本整对删除 |
-| L3 | 图片可被训练运行时解码 | 使用 OpenCV `imdecode` 检查，失败样本整对删除 |
+| L3 | 图片可被训练运行时解码 | 抽样后惰性使用 OpenCV `imdecode`，失败时自动补位 |
 
 L3 必须使用与 Ultralytics DataLoader 一致的 OpenCV 解码语义。某些文件虽然存在且能通过
 Pillow 验证，但 OpenCV 仍可能返回 `None`；Ultralytics 会将这种情况报告为
 `FileNotFoundError: Image Not Found`。
+
+为避免在 4.3 万张源图片上执行全量重解码，生成器先建立轻量候选池，再随机打乱候选，
+只解码到目标数量满足为止。遇到坏图会继续检查下一候选并自动补位，因此通常只需解码
+约 `train_count + val_count` 张，而不是解码整个源数据集。该策略不会用 1% 抽检替代完整性：
+所有最终写入的数据都已经通过 OpenCV 解码。
 
 从原始数据重新生成 blade-v2：
 
@@ -120,9 +125,10 @@ python scripts/create_small_dataset.py `
 
 - `missing_images` / `missing_labels`：源数据双向配对缺失数；
 - `corrupt_images`：OpenCV 无法解码而被拒绝的图片数；
+- `decode_checked`：为凑满目标数量实际执行 OpenCV 解码的候选数；
 - `fixed_points` / `fixed_files`：自动 clamp 的 polygon 点和标注文件数；
 - `removed_files`：因 polygon 或标注格式不可修复而删除的样本数；
-- `decode_removed`：复制后解码复检失败而删除的样本数；
+- `decode_removed`：兼容统计字段；惰性解码架构下通常为 0；
 - `copied`：最终通过全部检查、实际写入的数据量。
 
 若重建前手动保留了旧目录，需要清除 Ultralytics 索引缓存；正常删除整个输出目录后重建时，

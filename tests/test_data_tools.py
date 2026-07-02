@@ -82,11 +82,11 @@ def test_create_small_dataset_copies_only_pairs_and_writes_config(tmp_path: Path
         "train": {"requested": 2, "available_pairs": 4, "copied": 2, "unmatched_images": 0,
                   "missing_images": 0, "missing_labels": 0, "fixed_points": 0,
                   "fixed_files": 0, "removed_files": 0, "corrupt_images": 0,
-                  "decode_removed": 0},
+                  "decode_removed": 0, "decode_checked": 2},
         "val": {"requested": 3, "available_pairs": 1, "copied": 1, "unmatched_images": 1,
                 "missing_images": 1, "missing_labels": 1, "fixed_points": 0,
                 "fixed_files": 0, "removed_files": 0, "corrupt_images": 0,
-                "decode_removed": 0},
+                "decode_removed": 0, "decode_checked": 1},
     }
 
     for image_path in (first_output / "images").rglob("*"):
@@ -174,10 +174,40 @@ def test_create_small_dataset_rejects_images_opencv_cannot_decode(tmp_path: Path
     output = tmp_path / "output"
     stats = create_small_dataset(source, output, train_count=1, val_count=0)
 
-    assert stats["train"]["available_pairs"] == 0
+    assert stats["train"]["available_pairs"] == 1
     assert stats["train"]["copied"] == 0
     assert stats["train"]["corrupt_images"] == 1
+    assert stats["train"]["decode_checked"] == 1
     assert not any((output / "images" / "train").iterdir())
+
+
+def test_create_small_dataset_decodes_only_until_target_is_filled(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source = tmp_path / "source"
+    for split in ("train", "val"):
+        (source / "images" / split).mkdir(parents=True)
+        (source / "labels" / split).mkdir(parents=True)
+    for index in range(20):
+        image = source / "images" / "train" / f"{index}.jpg"
+        _write_test_image(image)
+        (source / "labels" / "train" / f"{index}.txt").write_text(
+            "0 0 0 1 0 1 1\n", encoding="utf-8"
+        )
+    decode_calls = 0
+    original_check = small_dataset_module._is_decodable_image
+
+    def count_decode(path: Path) -> bool:
+        nonlocal decode_calls
+        decode_calls += 1
+        return original_check(path)
+
+    monkeypatch.setattr(small_dataset_module, "_is_decodable_image", count_decode)
+    stats = create_small_dataset(source, tmp_path / "output", train_count=3, val_count=0)
+
+    assert stats["train"]["copied"] == 3
+    assert stats["train"]["decode_checked"] == 3
+    assert decode_calls == 3
 
 
 def test_valid_segmentation_line() -> None:

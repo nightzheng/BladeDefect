@@ -11,6 +11,7 @@ from pathlib import Path
 import cv2
 import numpy as np
 import yaml
+from tqdm import tqdm
 
 from blade_defect.data import DEFECT_CLASSES, check_dataset
 from blade_defect.utils import resolve_path
@@ -75,13 +76,40 @@ def _paired_samples(
         if label_path is None or not label_path.exists():
             missing_labels += 1
             continue
-        # 与 Ultralytics 训练阶段保持一致：文件存在不代表 OpenCV 能成功解码。
-        if not _is_decodable_image(image_path):
+        # 零字节文件可通过元数据快速拒绝，不进入后续解码候选池。
+        if image_path.stat().st_size == 0:
             corrupt_images += 1
             continue
         pairs.append((image_path, label_path, relative))
     missing_images = sum(key not in image_keys for key in labels_by_key)
     return pairs, missing_images, missing_labels, corrupt_images
+
+
+def _select_decodable_samples(
+    pairs: list[tuple[Path, Path, Path]],
+    requested: int,
+    rng: random.Random,
+    split: str,
+) -> tuple[list[tuple[Path, Path, Path]], int, int]:
+    """随机惰性解码候选，失败时自动补位，直到满足目标数量。"""
+    candidates = list(pairs)
+    rng.shuffle(candidates)
+    selected: list[tuple[Path, Path, Path]] = []
+    rejected = 0
+    checked = 0
+    # 进度按成功选中的样本推进；坏图只增加 checked/rejected，随后自动补位。
+    with tqdm(total=requested, desc=f"{split} 解码筛选", unit="张", disable=None) as progress:
+        for sample in candidates:
+            if len(selected) >= requested:
+                break
+            checked += 1
+            if _is_decodable_image(sample[0]):
+                selected.append(sample)
+                progress.update(1)
+            else:
+                rejected += 1
+            progress.set_postfix(checked=checked, rejected=rejected, refresh=False)
+    return selected, rejected, checked
 
 
 def _write_data_yaml(output_root: Path) -> Path:
@@ -127,15 +155,6 @@ def _clean_generated_split(output_root: Path, split: str) -> dict[str, int]:
             image_path.unlink(missing_ok=True)
         manually_removed += 1
 
-    decode_removed = 0
-    for image_path in _image_files(images_root):
-        if _is_decodable_image(image_path):
-            continue
-        relative = image_path.relative_to(images_root)
-        image_path.unlink()
-        (labels_root / relative.with_suffix(".txt")).unlink(missing_ok=True)
-        decode_removed += 1
-
     # 只有最终输出满足与 experiment run-all 相同的 strict 约束，生成才算成功。
     final_report = check_dataset(
         images_root,
@@ -150,7 +169,7 @@ def _clean_generated_split(output_root: Path, split: str) -> dict[str, int]:
         "fixed_points": repair_report.fixed_points,
         "fixed_files": repair_report.fixed_files,
         "removed_files": repair_report.removed_files + manually_removed,
-        "decode_removed": decode_removed,
+        "decode_removed": 0,
     }
 
 
@@ -180,7 +199,10 @@ def create_small_dataset(
     for split in SPLITS:
         pairs, missing_images, missing_labels, corrupt_images = _paired_samples(source_root, split)
         requested = requested_counts[split]
-        selected = rng.sample(pairs, min(requested, len(pairs)))
+        selected, decode_rejected, decode_checked = _select_decodable_samples(
+            pairs, requested, rng, split
+        )
+        corrupt_images += decode_rejected
         (output_root / "images" / split).mkdir(parents=True, exist_ok=True)
         (output_root / "labels" / split).mkdir(parents=True, exist_ok=True)
 
@@ -226,6 +248,7 @@ def create_small_dataset(
             "unmatched_images": missing_labels,
             "missing_images": missing_images,
             "missing_labels": missing_labels,
+            "decode_checked": decode_checked,
             "corrupt_images": corrupt_images + cleaning["decode_removed"],
             **cleaning,
         }

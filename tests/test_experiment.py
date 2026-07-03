@@ -15,8 +15,17 @@ def test_registry_contains_expected_baselines() -> None:
     assert [experiment.name for experiment in EXPERIMENTS] == [
         "exp001_yolov8n_seg_640", "exp002_yolov8s_seg_640",
         "exp003_yolo11n_seg_640", "exp004_yolo11s_seg_640",
+        "exp005_yolov8n_seg_960", "exp006_yolov8s_seg_960",
+        "exp007_yolo11n_seg_960", "exp008_yolo11s_seg_960",
+        "exp009_yolov8n_seg_1024", "exp010_yolov8s_seg_1024",
+        "exp011_yolo11n_seg_1024", "exp012_yolo11s_seg_1024",
+        "exp013_yolov8n_seg_1280", "exp014_yolov8s_seg_1280",
+        "exp015_yolo11n_seg_1280", "exp016_yolo11s_seg_1280",
     ]
     assert all(experiment.epochs == 50 and experiment.seed == 42 for experiment in EXPERIMENTS)
+    assert [experiment.imgsz for experiment in EXPERIMENTS] == (
+        [640] * 4 + [960] * 4 + [1024] * 4 + [1280] * 4
+    )
 
 
 def test_export_summary(tmp_path: Path) -> None:
@@ -144,3 +153,45 @@ def test_run_all_cli_validation_is_enabled_by_default() -> None:
     assert args.skip_validation is False
     skipped = build_parser().parse_args(["experiment", "run-all", "--skip-validation"])
     assert skipped.skip_validation is True
+
+
+def test_run_all_filters_experiments_by_image_size(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    initialized_models: list[object] = []
+
+    class FakeTrainer:
+        def __init__(self, model: object) -> None:
+            initialized_models.append(model)
+
+        def train(self, **kwargs: object) -> object:
+            name = str(kwargs["name"])
+            return SimpleNamespace(save_dir=tmp_path / "runs" / name)
+
+        def validate(self, data: Path, **kwargs: object) -> object:
+            metrics = SimpleNamespace(p=0.8, r=0.7, map50=0.6, map=0.5)
+            return SimpleNamespace(seg=metrics, speed={"inference": 10.0})
+
+    data = tmp_path / "data.yaml"
+    data.write_text("train: images/train\nval: images/val\nnames: [defect]\n", encoding="utf-8")
+    config = tmp_path / "train.yaml"
+    config.write_text(f"data: {data.as_posix()}\n", encoding="utf-8")
+    monkeypatch.setattr(runner_module, "SegmentationTrainer", FakeTrainer)
+
+    records = runner_module.run_all_experiments(
+        config=config,
+        runs_dir=tmp_path / "runs",
+        results_file=tmp_path / "summary.csv",
+        skip_validation=True,
+        imgsz=960,
+    )
+
+    assert len(records) == 4
+    assert all(record["imgsz"] == 960 for record in records)
+    # 每组实验会分别创建训练器和评估器，因此四个模型共初始化八次。
+    assert len(initialized_models) == 8
+
+
+def test_run_all_cli_accepts_image_size_filter() -> None:
+    args = build_parser().parse_args(["experiment", "run-all", "--imgsz", "1024"])
+    assert args.imgsz == 1024

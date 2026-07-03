@@ -65,8 +65,15 @@ def run_all_experiments(
     results_file: str | Path = "results/summary.csv",
     device: str | int | None = "auto", continue_on_error: bool = True,
     skip_validation: bool = False,
+    imgsz: int | None = None,
 ) -> list[dict[str, Any]]:
-    """使用同一份训练配置依次训练并评估全部 baseline。"""
+    """使用同一份训练配置依次训练并评估筛选后的 baseline。"""
+    selected_experiments = [
+        experiment for experiment in experiments
+        if imgsz is None or experiment.imgsz == imgsz
+    ]
+    if not selected_experiments:
+        raise ValueError(f"没有注册 imgsz={imgsz} 的实验")
     base_config, project_root = load_project_config(config)
     base_config.pop("model", None)
     data_path = resolve_path(base_config.get("data", "configs/data.yaml"), project_root)
@@ -78,7 +85,7 @@ def run_all_experiments(
         _validate_dataset(data_path)
     output_root = resolve_path(runs_dir)
     records: list[dict[str, Any]] = []
-    for experiment in experiments:
+    for experiment in selected_experiments:
         experiment_dir = output_root / experiment.name
         try:
             model = resolve_model_reference(experiment.model, project_root)

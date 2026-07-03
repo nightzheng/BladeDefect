@@ -107,6 +107,12 @@ def build_parser() -> argparse.ArgumentParser:
     run_all.add_argument("--output", default="results/summary.csv", type=resolve_path)
     run_all.add_argument("--device", default="auto", choices=("auto", "0", "cpu"))
     run_all.add_argument(
+        "--imgsz",
+        type=int,
+        choices=(640, 960, 1024, 1280),
+        help="只运行指定输入尺寸的四个模型；默认运行全部尺寸",
+    )
+    run_all.add_argument(
         "--skip-validation",
         action="store_true",
         help="显式跳过训练前 strict dataset validation gate",
@@ -169,7 +175,7 @@ def main() -> None:
         if args.experiment_command == "run-all":
             records = run_all_experiments(config=args.config, runs_dir=args.runs_dir,
                                           results_file=args.output, device=args.device,
-                                          skip_validation=args.skip_validation)
+                                          skip_validation=args.skip_validation, imgsz=args.imgsz)
             print(json.dumps(records, ensure_ascii=False, indent=2))
         elif args.experiment_command == "summary":
             print(export_summary(args.runs_dir, args.output))

@@ -51,14 +51,20 @@ def _read_summary(path: Path) -> list[dict[str, Any]]:
 
 
 def _models(rows: Iterable[dict[str, Any]]) -> list[str]:
-    return [str(row.get("model") or row.get("experiment name") or "unknown") for row in rows]
+    # 实验名包含输入尺寸，优先使用它可区分同一模型的 640/960 等多组结果。
+    return [str(row.get("experiment name") or row.get("model") or "unknown") for row in rows]
+
+
+def _series_colors(count: int) -> list[str]:
+    """按需循环调色板，保证颜色数量与实验数量严格一致。"""
+    return [_COLORS[index % len(_COLORS)] for index in range(count)]
 
 
 def _bar(ax: Any, labels: list[str], values: list[float], title: str, ylabel: str) -> None:
-    bars = ax.bar(labels, values, color=_COLORS[: len(labels)])
+    bars = ax.bar(labels, values, color=_series_colors(len(labels)))
     ax.set_title(title)
     ax.set_ylabel(ylabel)
-    ax.tick_params(axis="x", rotation=20)
+    ax.tick_params(axis="x", rotation=30, labelsize=8)
     ax.grid(axis="y", alpha=0.25)
     for bar, value in zip(bars, values):
         if value == value:
@@ -76,7 +82,13 @@ def _save_summary_plot(rows: list[dict[str, Any]], output: Path) -> None:
     _bar(axes[0, 0], labels, map50, "mAP50 vs Model", "mAP50")
     _bar(axes[0, 1], labels, map95, "mAP50-95 vs Model", "mAP50-95")
     _bar(axes[1, 0], labels, fps, "FPS vs Model", "FPS")
-    axes[1, 1].scatter(fps, map95, s=90, c=_COLORS[: len(labels)], edgecolors="white")
+    axes[1, 1].scatter(
+        fps,
+        map95,
+        s=90,
+        c=_series_colors(len(labels)),
+        edgecolors="white",
+    )
     for x, y, label in zip(fps, map95, labels):
         axes[1, 1].annotate(label, (x, y), xytext=(5, 5), textcoords="offset points", fontsize=8)
     axes[1, 1].set(title="FPS–Accuracy Trade-off", xlabel="FPS", ylabel="mAP50-95")

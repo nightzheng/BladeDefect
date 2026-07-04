@@ -54,11 +54,12 @@ def test_analyze_experiments_generates_publication_plots(tmp_path: Path) -> None
     results = tmp_path / "results"
     results.mkdir()
     summary = results / "summary.csv"
-    summary.write_text(
-        "experiment name,model,mAP50,mAP50-95,precision,recall,fps\n"
-        "exp001,yolo11n-seg.pt,0.8,0.5,0.7,0.6,100\n",
-        encoding="utf-8",
+    summary_rows = ["experiment name,model,mAP50,mAP50-95,precision,recall,fps"]
+    summary_rows.extend(
+        f"exp{index:03d},model{index}.pt,0.8,0.5,0.7,0.6,{100 - index}"
+        for index in range(1, 9)
     )
+    summary.write_text("\n".join(summary_rows) + "\n", encoding="utf-8")
     run = tmp_path / "runs" / "exp001"
     run.mkdir(parents=True)
     run.joinpath("metrics.json").write_text(json.dumps({

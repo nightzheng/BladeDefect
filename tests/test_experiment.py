@@ -196,3 +196,29 @@ def test_run_all_filters_experiments_by_image_size(
 def test_run_all_cli_accepts_image_size_filter() -> None:
     args = build_parser().parse_args(["experiment", "run-all", "--imgsz", "1024"])
     assert args.imgsz == 1024
+
+
+def test_run_all_selects_experiments_by_name_or_id() -> None:
+    selected = runner_module._select_experiments(
+        EXPERIMENTS,
+        imgsz=None,
+        selectors=["exp014_yolov8s_seg_1280", "16"],
+    )
+    assert [experiment.name for experiment in selected] == [
+        "exp014_yolov8s_seg_1280",
+        "exp016_yolo11s_seg_1280",
+    ]
+
+
+def test_run_all_rejects_unknown_experiment_selector() -> None:
+    with pytest.raises(ValueError, match="未知实验名称或 ID"):
+        runner_module._select_experiments(EXPERIMENTS, None, ["exp999"])
+
+
+def test_run_all_cli_accepts_repeated_experiment_filters() -> None:
+    args = build_parser().parse_args([
+        "experiment", "run-all",
+        "--experiment", "exp014",
+        "--experiment", "16",
+    ])
+    assert args.experiments == ["exp014", "16"]

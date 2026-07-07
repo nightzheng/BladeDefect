@@ -53,6 +53,53 @@ def _validate_dataset(data_path: Path) -> None:
         )
 
 
+def _experiment_id(name: str) -> str:
+    """从实验名称中提取规范化 ID，例如 exp014。"""
+    return name.split("_", 1)[0].lower()
+
+
+def _normalize_selector(selector: str) -> str:
+    """将 14、014、exp014 等写法统一为 exp014。"""
+    value = selector.strip().lower()
+    if value.isdigit():
+        return f"exp{int(value):03d}"
+    return value
+
+
+def _select_experiments(
+    experiments: Iterable[ExperimentConfig],
+    imgsz: int | None,
+    selectors: Iterable[str] | None,
+) -> list[ExperimentConfig]:
+    """按可选尺寸及名称/ID筛选实验，并拒绝未知选择器。"""
+    available = list(experiments)
+    normalized = [_normalize_selector(selector) for selector in selectors or []]
+    if normalized:
+        known_names = {experiment.name.lower() for experiment in available}
+        known_ids = {_experiment_id(experiment.name) for experiment in available}
+        unknown = [value for value in normalized if value not in known_names | known_ids]
+        if unknown:
+            raise ValueError(f"未知实验名称或 ID：{', '.join(unknown)}")
+    selected = [
+        experiment
+        for experiment in available
+        if (imgsz is None or experiment.imgsz == imgsz)
+        and (
+            not normalized
+            or experiment.name.lower() in normalized
+            or _experiment_id(experiment.name) in normalized
+        )
+    ]
+    if not selected:
+        conditions = []
+        if imgsz is not None:
+            conditions.append(f"imgsz={imgsz}")
+        if normalized:
+            conditions.append(f"experiment={','.join(normalized)}")
+        raise ValueError(f"没有匹配的注册实验：{'; '.join(conditions)}")
+    return selected
+
+
 def _fps_from_result(result: Any) -> float:
     """将 Ultralytics 的单图推理毫秒数换算为 FPS。"""
     milliseconds = float((getattr(result, "speed", {}) or {}).get("inference", 0.0) or 0.0)
@@ -66,14 +113,10 @@ def run_all_experiments(
     device: str | int | None = "auto", continue_on_error: bool = True,
     skip_validation: bool = False,
     imgsz: int | None = None,
+    experiment_selectors: Iterable[str] | None = None,
 ) -> list[dict[str, Any]]:
     """使用同一份训练配置依次训练并评估筛选后的 baseline。"""
-    selected_experiments = [
-        experiment for experiment in experiments
-        if imgsz is None or experiment.imgsz == imgsz
-    ]
-    if not selected_experiments:
-        raise ValueError(f"没有注册 imgsz={imgsz} 的实验")
+    selected_experiments = _select_experiments(experiments, imgsz, experiment_selectors)
     base_config, project_root = load_project_config(config)
     base_config.pop("model", None)
     data_path = resolve_path(base_config.get("data", "configs/data.yaml"), project_root)

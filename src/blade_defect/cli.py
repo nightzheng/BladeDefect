@@ -113,6 +113,13 @@ def build_parser() -> argparse.ArgumentParser:
         help="只运行指定输入尺寸的四个模型；默认运行全部尺寸",
     )
     run_all.add_argument(
+        "--experiment",
+        action="append",
+        dest="experiments",
+        metavar="NAME_OR_ID",
+        help="按完整名称或 ID 选择实验；可重复传入，例如 exp014 或 16",
+    )
+    run_all.add_argument(
         "--skip-validation",
         action="store_true",
         help="显式跳过训练前 strict dataset validation gate",
@@ -175,7 +182,8 @@ def main() -> None:
         if args.experiment_command == "run-all":
             records = run_all_experiments(config=args.config, runs_dir=args.runs_dir,
                                           results_file=args.output, device=args.device,
-                                          skip_validation=args.skip_validation, imgsz=args.imgsz)
+                                          skip_validation=args.skip_validation, imgsz=args.imgsz,
+                                          experiment_selectors=args.experiments)
             print(json.dumps(records, ensure_ascii=False, indent=2))
         elif args.experiment_command == "summary":
             print(export_summary(args.runs_dir, args.output))

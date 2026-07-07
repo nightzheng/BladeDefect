@@ -34,6 +34,20 @@ blade-defect experiment run-all --imgsz 960 --device 0
 全部 16 组实验。该参数属于本次批量实验的筛选条件，因此不写入 `train.yaml`；
 `train.yaml` 的 `imgsz` 仍只影响单独执行的 `blade-defect train`。
 
+按完整实验名称或实验 ID 精确选择时，可重复传入 `--experiment`：
+
+```powershell
+# 完整名称与短 ID 可以混用
+blade-defect experiment run-all `
+  --experiment exp014_yolov8s_seg_1280 `
+  --experiment exp016 `
+  --device 0
+```
+
+数字 ID 也可省略 `exp` 前缀，例如 `--experiment 14 --experiment 16`。
+同时传入 `--imgsz` 和 `--experiment` 时会取两者交集；名称或 ID 不存在时，
+命令会在数据检查和训练开始前直接报错。
+
 也可以覆盖数据、设备和输出位置：
 
 ```powershell

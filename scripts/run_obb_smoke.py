@@ -1,4 +1,4 @@
-"""Run the isolated one-epoch OBB smoke experiment and write a Markdown report."""
+"""运行独立的单轮 OBB 冒烟实验并生成 Markdown 报告。"""
 
 from __future__ import annotations
 

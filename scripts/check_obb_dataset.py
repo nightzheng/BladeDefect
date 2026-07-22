@@ -1,4 +1,4 @@
-"""Validate both train and val splits of a YOLO-OBB dataset."""
+"""校验 YOLO-OBB 数据集的训练集和验证集。"""
 
 from __future__ import annotations
 

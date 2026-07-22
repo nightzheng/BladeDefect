@@ -1,4 +1,4 @@
-"""Convert YOLO segmentation polygons into YOLO oriented bounding boxes."""
+"""将 YOLO 分割多边形标签转换为 YOLO 定向边界框标签。"""
 
 from __future__ import annotations
 
@@ -9,7 +9,7 @@ import shutil
 from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Sequence, TypedDict
+from typing import Any, Sequence
 
 import cv2
 import numpy as np
@@ -25,22 +25,14 @@ DEFAULT_MIN_AREA = 1e-8
 CSV_FIELDS = ("split", "label", "line", "class_id", "severity", "reason", "count", "details")
 
 
-class IssueRow(TypedDict):
-    split: str
-    label: str
-    line: int
-    class_id: str
-    severity: str
-    reason: str
-    count: int
-    details: str
+IssueRow = dict[str, Any]
 
 
 WarningRecord = tuple[str, str, int]
 
 
 class PolygonConversionError(ValueError):
-    """A polygon cannot produce a valid oriented bounding box."""
+    """多边形无法生成有效定向边界框时抛出的异常。"""
 
     def __init__(
         self,
@@ -72,7 +64,7 @@ def _deduplicate_points(points: np.ndarray) -> tuple[np.ndarray, int]:
 
 
 def order_obb_corners(corners: np.ndarray) -> np.ndarray:
-    """Order corners clockwise in image coordinates, starting at top/left."""
+    """在图像坐标系中顺时针排序角点，并从顶部最左角点开始。"""
     points = np.asarray(corners, dtype=np.float64).reshape(4, 2)
     center = points.mean(axis=0)
     angles = np.arctan2(points[:, 1] - center[1], points[:, 0] - center[0])
@@ -88,7 +80,7 @@ def convert_polygon_to_obb(
     min_area: float = DEFAULT_MIN_AREA,
     image_size: tuple[int, int] | None = None,
 ) -> PolygonResult:
-    """Convert normalized polygon points into a deterministic normalized OBB."""
+    """将归一化多边形点转换为顺序确定的归一化 OBB。"""
     try:
         points = np.asarray(polygon, dtype=np.float64).reshape(-1, 2)
     except (TypeError, ValueError) as exc:
@@ -150,12 +142,10 @@ def convert_polygon_to_obb(
             f"minimum rectangle area {rectangle_area:.12g} is below {min_area:.12g}",
             warnings,
         )
-    # Clip before choosing the start corner. Two corners that were microscopically
-    # outside the same image edge become tied after clipping; the left-most one
-    # must then be selected to preserve the published ordering convention.
+    # 选择起始角点前先裁剪坐标。两个略微越过同一图像边缘的角点在裁剪后会变为等高，
+    # 此时必须选择最左侧角点，确保输出始终遵循约定的角点顺序。
     clipped_corners = np.clip(corners, 0.0, 1.0)
-    # Ordering must describe the serialized values, not higher-precision values
-    # that can become tied only after the 8-decimal label formatting step.
+    # 角点顺序必须基于最终序列化值；高精度坐标可能在格式化为 8 位小数后才出现并列。
     serialized_corners = np.round(clipped_corners, 8)
     return PolygonResult(corners=order_obb_corners(serialized_corners), warnings=tuple(warnings))
 
@@ -203,10 +193,10 @@ def convert_label_text(
     min_area: float = DEFAULT_MIN_AREA,
     image_size: tuple[int, int] | None = None,
 ) -> tuple[str, list[IssueRow], int]:
-    """Convert all recoverable instances in one segmentation label file.
+    """转换单个分割标签文件中所有可恢复的实例。
 
-    A failed polygon is removed as a single instance. Other valid instances in
-    the same image are retained, and every repair/failure is returned in rows.
+    转换失败时只删除对应的单个多边形，同一图像内其他有效实例仍会保留；
+    每次修复和失败都会以结构化记录返回。
     """
     output_lines: list[str] = []
     issues: list[IssueRow] = []
@@ -319,7 +309,7 @@ def convert_dataset(
     limit: int | None = None,
     overwrite: bool = False,
 ) -> dict[str, object]:
-    """Convert train/val splits, copy images and emit complete audit reports."""
+    """转换训练集和验证集、复制图像，并生成完整审计报告。"""
     source_root = Path(source).resolve()
     output_root = Path(output).resolve()
     results_root = Path(results).resolve()
@@ -441,7 +431,7 @@ def convert_dataset(
             "negative_images": negative_images,
             "output_images": len(images),
             "output_labels": len(images),
-            # Backward-compatible aliases used by the first conversion tests.
+            # 保留初版转换测试使用的字段别名，维持向后兼容。
             "label_files": len(selected_labels),
             "converted_objects": converted_instances,
             "issue_records": len(split_rows),
@@ -483,9 +473,23 @@ def convert_dataset(
     with (results_root / "invalid_obb_labels.csv").open(
         "w", encoding="utf-8-sig", newline=""
     ) as file:
-        writer = csv.DictWriter(file, fieldnames=CSV_FIELDS)
-        writer.writeheader()
-        writer.writerows(issue_rows)
+        writer = csv.writer(file, lineterminator="\n")
+        writer.writerow(CSV_FIELDS)
+        writer.writerows(
+            [
+                [
+                    row["split"],
+                    row["label"],
+                    row["line"],
+                    row["class_id"],
+                    row["severity"],
+                    row["reason"],
+                    row["count"],
+                    row["details"],
+                ]
+                for row in issue_rows
+            ]
+        )
     (results_root / "conversion_summary.json").write_text(
         json.dumps(summary, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
     )

@@ -1,4 +1,4 @@
-"""Dataset cleaning, validation and splitting."""
+"""数据集清理、校验与划分工具。"""
 
 from .cleaning import CleaningReport, clean_dataset
 from .defect_classes import (

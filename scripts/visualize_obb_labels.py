@@ -1,4 +1,4 @@
-"""Create side-by-side previews of source polygons and converted OBB labels."""
+"""生成原始多边形与转换后 OBB 标签的并排预览图。"""
 
 from __future__ import annotations
 
@@ -154,7 +154,7 @@ def generate_previews(
     count: int = 100,
     seed: int = 42,
 ) -> dict[str, object]:
-    """Generate an approximately even, class-diverse train/val preview set."""
+    """生成训练集和验证集数量近似均衡、类别尽量丰富的预览集。"""
     if count < 2:
         raise ValueError("count must be at least 2")
     seg_root = Path(source_seg).resolve()

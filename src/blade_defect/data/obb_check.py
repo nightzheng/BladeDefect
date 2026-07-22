@@ -1,4 +1,4 @@
-"""Strict validation for YOLO oriented bounding-box datasets."""
+"""YOLO 定向边界框数据集的严格校验工具。"""
 
 from __future__ import annotations
 
@@ -109,7 +109,7 @@ def check_obb_dataset(
     num_classes: int = 15,
     min_area: float = 1e-8,
 ) -> OBBDatasetReport:
-    """Validate pairing, image integrity and every YOLO-OBB label row."""
+    """校验图像标签配对、图像完整性以及每一行 YOLO-OBB 标签。"""
     images_root = resolve_path(images_dir)
     labels_root = resolve_path(labels_dir)
     if num_classes <= 0:

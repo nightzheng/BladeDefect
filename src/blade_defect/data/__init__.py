@@ -9,6 +9,7 @@ from .defect_classes import (
     get_group_name,
 )
 from .label_check import DatasetCheckReport, check_dataset, clamp01
+from .obb_check import OBBDatasetIssue, OBBDatasetReport, check_obb_dataset
 from .split import split_dataset
 
 __all__ = [
@@ -22,5 +23,8 @@ __all__ = [
     "DatasetCheckReport",
     "check_dataset",
     "clamp01",
+    "OBBDatasetIssue",
+    "OBBDatasetReport",
+    "check_obb_dataset",
     "split_dataset",
 ]

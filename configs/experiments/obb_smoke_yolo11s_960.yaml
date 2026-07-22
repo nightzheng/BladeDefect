@@ -1,0 +1,17 @@
+project_root: ../..
+name: exp_obb001_yolo11s_obb_960_smoke
+task: obb
+model: yolo11s-obb.pt
+data: datasets/blade-v2-obb/data.yaml
+imgsz: 960
+epochs: 1
+batch: 4
+workers: 2
+device: 0
+seed: 42
+pretrained: true
+cache: false
+amp: true
+project: runs/obb
+report: results/obb/obb_smoke_report.md
+prediction_output: results/obb/smoke_prediction

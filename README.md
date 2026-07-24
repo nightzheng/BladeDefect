@@ -97,8 +97,11 @@ blade-defect check-labels --images datasets/raw/images --labels datasets/raw/lab
 # 扫描损坏图像、重复图像和空标注（不会自动删除数据）
 blade-defect clean --images datasets/raw/images --labels datasets/raw/labels
 
+# 生成类别、图像尺寸、bbox、mask、目标大小、异常标注和图表统计
+python scripts/analyze_dataset.py --images D:\images --labels D:\labels --data configs\data.yaml --output results\dataset --filter-config configs\dataset_filter.yaml
+
 # 划分数据集（复制文件）
-blade-defect split --images datasets/raw/images --labels datasets/raw/labels --output datasets/blade
+blade-defect split --images datasets/raw/images --labels datasets/raw/labels --output datasets/blade --filter-config configs/dataset_filter.yaml
 
 # 训练
 blade-defect train --config configs/train.yaml
@@ -126,6 +129,54 @@ blade-defect experiment summary
 
 # 生成 results/analysis 下的论文级图表
 blade-defect experiment analyze
+```
+
+`configs/dataset_filter.yaml` 按文件名记录数据质量处理决定：`exclude` 和 `review`
+不会进入任何数据划分，`keep_negative` 会保留图片并在输出数据集中创建同名空标签，作为
+无缺陷负样本使用。缺少多边形坐标的缺陷图片不会由程序自动补标。
+
+`scripts/analyze_dataset.py` 只读取原始图片和标签。位于 `[-0.01, 1.01]` 的轻微越界坐标
+会逐坐标记录，并只在统计内存中重置到 `[0,1]`；超出该区间的严重越界整行不计算几何面积，
+等待排除或人工复查。`results/dataset/out_of_bounds_coordinates.csv` 记录具体坐标、点序号、
+x/y位置、越界方向、越界幅度、类别和处理动作。数据划分和小样本生成会先复制数据，再将
+soft error修正结果写入新数据集的同名标签，所有处理均不会回写原标签。未经人工确认的
+hard error不会自动删除；生成流程会停止并保留问题样本，
+待人工确认后修复，或通过 `dataset_filter.yaml` 明确排除。
+
+## blade-v2 正式数据版本
+
+第二周已冻结 `datasets/blade-v2`。该版本保留源train/val划分，通过 `train.txt`、`val.txt`
+固定48,291张有效图片；修正后的48,291个标签实际保存在 `labels/train|val`。由于原图约
+180.15GB且本地空间不足，`images/train|val` 使用NTFS目录联接只读访问 `D:\images`，
+训练和统计必须使用清单及 `configs/dataset_filter.yaml`，不能直接枚举联接目录中的全部图片。
+
+131张hard error图片已经逐图复核，全部记录为 `repair_confirmed`；202个hard行内坐标和
+747个soft坐标只在新标签中重置到 `[0,1]`。严格校验结果为：49,471个实例，图片完整解码
+失败、缺标签、孤立标签、非法类别、polygon点数异常和越界坐标均为0。
+
+复现、哈希和存储说明见 `docs/dataset_version.md`；完整质量报告见 `docs/dataset_report.md`。
+
+```powershell
+# 正式版本统计（必须带同一filter）
+python scripts\analyze_dataset.py `
+  --images datasets\blade-v2\images `
+  --labels datasets\blade-v2\labels `
+  --data datasets\blade-v2\data.yaml `
+  --output results\dataset_v2 `
+  --filter-config configs\dataset_filter.yaml `
+  --workers 16
+
+# 6个上级类别分布
+python scripts\analyze_class_hierarchy.py `
+  --dataset datasets\blade-v2 `
+  --hierarchy configs\class_hierarchy.yaml `
+  --output results\hierarchy
+
+# train/val泄漏候选扫描
+python scripts\check_split_leakage.py `
+  --dataset datasets\blade-v2 `
+  --output results\dataset_review\split_leakage_review.csv `
+  --workers 16
 ```
 
 推理命令同时兼容原有的 `--model` 参数。`train`、`predict`、`evaluate` / `eval` 和 `ablation`

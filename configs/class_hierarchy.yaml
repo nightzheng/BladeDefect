@@ -1,0 +1,21 @@
+version: 1
+
+groups:
+  surface_corrosion:
+    name_zh: 表面腐蚀
+    class_ids: [0, 1, 2, 3]
+  surface_crack:
+    name_zh: 表面裂纹
+    class_ids: [4, 5]
+  surface_defect:
+    name_zh: 表面缺陷
+    class_ids: [6, 7, 8, 9]
+  repair_trace:
+    name_zh: 维修痕迹
+    class_ids: [10]
+  blade_damage:
+    name_zh: 叶片损伤
+    class_ids: [11, 12, 13]
+  attachment_loss:
+    name_zh: 附件脱落
+    class_ids: [14]

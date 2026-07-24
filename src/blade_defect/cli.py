@@ -76,6 +76,11 @@ def build_parser() -> argparse.ArgumentParser:
     split.add_argument("--ratios", nargs=3, type=float, default=(0.7, 0.2, 0.1))
     split.add_argument("--seed", type=int, default=42)
     split.add_argument("--move", action="store_true")
+    split.add_argument(
+        "--filter-config",
+        type=resolve_path,
+        help="可选；按文件名执行排除、复核和负样本保留规则",
+    )
 
     train = subparsers.add_parser("train")
     train.add_argument("--config", default="configs/train.yaml", type=resolve_path)
@@ -171,7 +176,13 @@ def main() -> None:
         print(json.dumps(payload, ensure_ascii=False, indent=2))
     elif args.command == "split":
         counts = split_dataset(
-            args.images, args.labels, args.output, tuple(args.ratios), args.seed, copy=not args.move
+            args.images,
+            args.labels,
+            args.output,
+            tuple(args.ratios),
+            args.seed,
+            copy=not args.move,
+            filter_config=args.filter_config,
         )
         print(json.dumps(counts, ensure_ascii=False, indent=2))
     elif args.command == "train":

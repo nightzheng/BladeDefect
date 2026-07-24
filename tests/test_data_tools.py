@@ -13,6 +13,7 @@ from blade_defect.data import (
     get_class_name,
     get_group_classes,
     get_group_name,
+    load_dataset_filter,
     split_dataset,
 )
 from blade_defect.data.label_check import validate_seg_line
@@ -23,6 +24,22 @@ from scripts import create_small_dataset as small_dataset_module
 def _write_test_image(path: Path) -> None:
     """写入一张 Pillow 和 OpenCV 都能解码的小图片。"""
     Image.new("RGB", (4, 4), color="white").save(path)
+
+
+def _write_filter_config(path: Path, images: list[dict[str, str]]) -> None:
+    path.write_text(
+        yaml.safe_dump(
+            {
+                "version": 1,
+                "issue_types": ["missing_label", "uncertain_annotation"],
+                "actions": ["exclude", "review", "keep_negative"],
+                "images": images,
+            },
+            allow_unicode=True,
+            sort_keys=False,
+        ),
+        encoding="utf-8",
+    )
 
 
 def test_defect_class_ids_are_contiguous() -> None:
@@ -40,6 +57,18 @@ def test_data_yaml_names_match_defect_classes() -> None:
     config_path = Path(__file__).parents[1] / "configs" / "data.yaml"
     config = yaml.safe_load(config_path.read_text(encoding="utf-8"))
     assert config["names"] == DEFECT_CLASSES
+
+
+def test_project_dataset_filter_contains_confirmed_decisions() -> None:
+    config_path = Path(__file__).parents[1] / "configs" / "dataset_filter.yaml"
+    dataset_filter = load_dataset_filter(config_path)
+
+    decisions = list(dataset_filter.decisions.values())
+    assert len(decisions) == 24
+    assert sum(decision.action == "exclude" for decision in decisions) == 19
+    assert sum(decision.action == "keep_negative" for decision in decisions) == 5
+    assert sum(decision.issue == "corrupted_file" for decision in decisions) == 10
+    assert all(decision.status == "confirmed" for decision in decisions)
 
 
 @pytest.mark.parametrize("lookup", [get_class_name, get_group_name])
@@ -99,6 +128,51 @@ def test_create_small_dataset_copies_only_pairs_and_writes_config(tmp_path: Path
     assert data_config["names"] == DEFECT_CLASSES
 
 
+def test_create_small_dataset_applies_filter_and_creates_empty_negative_label(
+    tmp_path: Path,
+) -> None:
+    source = tmp_path / "source"
+    for split in ("train", "val"):
+        (source / "images" / split).mkdir(parents=True)
+        (source / "labels" / split).mkdir(parents=True)
+    _write_test_image(source / "images" / "train" / "paired.jpg")
+    (source / "labels" / "train" / "paired.txt").write_text(
+        "0 0 0 1 0 1 1\n", encoding="utf-8"
+    )
+    _write_test_image(source / "images" / "train" / "negative.jpg")
+    _write_test_image(source / "images" / "train" / "excluded.jpg")
+    filter_config = tmp_path / "dataset_filter.yaml"
+    _write_filter_config(
+        filter_config,
+        [
+            {
+                "filename": "negative.jpg",
+                "action": "keep_negative",
+                "reason": "确认无损伤",
+                "status": "confirmed",
+            },
+            {
+                "filename": "excluded.jpg",
+                "action": "exclude",
+                "issue": "missing_label",
+                "reason": "有缺陷但没有坐标",
+                "status": "confirmed",
+            },
+        ],
+    )
+
+    output = tmp_path / "output"
+    stats = create_small_dataset(
+        source, output, train_count=2, val_count=0, filter_config=filter_config
+    )
+
+    assert stats["train"]["available_pairs"] == 2
+    assert stats["train"]["excluded_images"] == 1
+    assert stats["train"]["negative_images"] == 1
+    assert (output / "labels" / "train" / "negative.txt").read_text(encoding="utf-8") == ""
+    assert not (output / "images" / "train" / "excluded.jpg").exists()
+
+
 def test_create_small_dataset_cleans_partial_copy_if_source_disappears(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -127,7 +201,7 @@ def test_create_small_dataset_cleans_partial_copy_if_source_disappears(
     assert not any((output / "labels" / "train").iterdir())
 
 
-def test_create_small_dataset_repairs_or_removes_invalid_polygons(tmp_path: Path) -> None:
+def test_create_small_dataset_repairs_soft_but_stops_for_hard_review(tmp_path: Path) -> None:
     source = tmp_path / "source"
     for split in ("train", "val"):
         (source / "images" / split).mkdir(parents=True)
@@ -142,22 +216,15 @@ def test_create_small_dataset_repairs_or_removes_invalid_polygons(tmp_path: Path
         (source / "labels" / "train" / f"{name}.txt").write_text(annotation, encoding="utf-8")
 
     output = tmp_path / "output"
-    stats = create_small_dataset(source, output, train_count=3, val_count=0)
+    with pytest.raises(RuntimeError, match="程序不会自动删除"):
+        create_small_dataset(source, output, train_count=3, val_count=0)
 
-    assert stats["train"]["copied"] == 1
-    assert stats["train"]["fixed_points"] == 2
-    assert stats["train"]["fixed_files"] == 1
-    assert stats["train"]["removed_files"] == 2
     assert (output / "labels" / "train" / "soft.txt").read_text(encoding="utf-8") == (
         "0 0 0.1 0.5 0.1 0.5 1\n"
     )
-    final_report = check_dataset(
-        output / "images" / "train",
-        output / "labels" / "train",
-        num_classes=len(DEFECT_CLASSES),
-        polygon_mode="strict",
-    )
-    assert final_report.valid
+    assert (output / "labels" / "train" / "hard.txt").exists()
+    assert (output / "images" / "train" / "hard.jpg").exists()
+    assert (source / "labels" / "hard.txt").read_text(encoding="utf-8") == samples["hard"]
 
 
 def test_create_small_dataset_rejects_images_opencv_cannot_decode(tmp_path: Path) -> None:
@@ -371,9 +438,104 @@ def test_uppercase_extensions_and_case_insensitive_pairing(tmp_path: Path) -> No
 
     output = tmp_path / "output"
     counts = split_dataset(images, labels, output, ratios=(1.0, 0.0, 0.0))
-    assert counts == {"train": 1, "val": 0, "test": 0, "unmatched_images": 0}
+    assert counts == {
+        "train": 1,
+        "val": 0,
+        "test": 0,
+        "unmatched_images": 0,
+        "fixed_points": 0,
+        "fixed_label_files": 0,
+        "removed_invalid_samples": 0,
+    }
     assert (output / "images" / "train" / "Nested" / "Blade.JPG").exists()
     assert (output / "labels" / "train" / "Nested" / "Blade.txt").exists()
+
+
+def test_split_dataset_applies_filter_actions(tmp_path: Path) -> None:
+    images = tmp_path / "images"
+    labels = tmp_path / "labels"
+    images.mkdir()
+    labels.mkdir()
+    for filename in ("paired.jpg", "negative.jpg", "excluded.jpg", "review.jpg"):
+        _write_test_image(images / filename)
+    (labels / "paired.txt").write_text("0 0 0 1 0 1 1\n", encoding="utf-8")
+    filter_config = tmp_path / "dataset_filter.yaml"
+    _write_filter_config(
+        filter_config,
+        [
+            {
+                "filename": "negative.jpg",
+                "action": "keep_negative",
+                "reason": "确认无损伤",
+                "status": "confirmed",
+            },
+            {
+                "filename": "excluded.jpg",
+                "action": "exclude",
+                "issue": "missing_label",
+                "reason": "有缺陷但没有坐标",
+                "status": "confirmed",
+            },
+            {
+                "filename": "review.jpg",
+                "action": "review",
+                "issue": "uncertain_annotation",
+                "reason": "等待复核",
+                "status": "pending",
+            },
+        ],
+    )
+
+    output = tmp_path / "output"
+    counts = split_dataset(
+        images,
+        labels,
+        output,
+        ratios=(1.0, 0.0, 0.0),
+        filter_config=filter_config,
+    )
+
+    assert counts == {
+        "train": 2,
+        "val": 0,
+        "test": 0,
+        "unmatched_images": 0,
+        "fixed_points": 0,
+        "fixed_label_files": 0,
+        "removed_invalid_samples": 0,
+        "excluded_images": 1,
+        "review_images": 1,
+        "negative_images": 1,
+    }
+    assert (output / "images" / "train" / "paired.jpg").exists()
+    assert (output / "labels" / "train" / "negative.txt").read_text(encoding="utf-8") == ""
+    assert not (output / "images" / "train" / "excluded.jpg").exists()
+    assert not (output / "images" / "train" / "review.jpg").exists()
+
+
+def test_split_dataset_repairs_only_new_labels_and_stops_for_hard_review(tmp_path: Path) -> None:
+    images = tmp_path / "images"
+    labels = tmp_path / "labels"
+    images.mkdir()
+    labels.mkdir()
+    soft_source = "0 -0.005 0.1 0.5 0.1 0.5 1.006\n"
+    hard_source = "0 0.1 0.1 1.2 0.1 0.5 0.5\n"
+    for name, annotation in (("soft", soft_source), ("hard", hard_source)):
+        _write_test_image(images / f"{name}.jpg")
+        (labels / f"{name}.txt").write_text(annotation, encoding="utf-8")
+
+    output = tmp_path / "output"
+    with pytest.raises(RuntimeError, match="程序不会自动删除"):
+        split_dataset(images, labels, output, ratios=(1.0, 0.0, 0.0))
+
+    # 学长确认的规则：原始标签不变，修正只写入新数据集。
+    assert (labels / "soft.txt").read_text(encoding="utf-8") == soft_source
+    assert (labels / "hard.txt").read_text(encoding="utf-8") == hard_source
+    assert (output / "labels" / "train" / "soft.txt").read_text(encoding="utf-8") == (
+        "0 0 0.1 0.5 0.1 0.5 1\n"
+    )
+    assert (output / "labels" / "train" / "hard.txt").exists()
+    assert (output / "images" / "train" / "hard.jpg").exists()
 
 
 def test_clean_dataset_reports_duplicates_and_empty_labels(tmp_path: Path) -> None:

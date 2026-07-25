@@ -1,0 +1,9 @@
+name: exp008_yolo11s_seg_960
+model: yolo11s-seg.pt
+imgsz: 960
+epochs: 50
+batch: 8
+seed: 42
+notes: >
+  正式 baseline，使用 YOLO11s-seg 在 960 分辨率下训练。
+  作为后续模型的性能基准参照。

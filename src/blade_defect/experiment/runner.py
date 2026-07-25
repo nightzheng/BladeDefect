@@ -1,4 +1,4 @@
-"""按注册顺序执行 baseline 实验。"""
+﻿"""按注册顺序执行 baseline 实验。"""
 from __future__ import annotations
 
 from pathlib import Path
@@ -11,6 +11,8 @@ from blade_defect.utils.files import load_dataset_config, load_project_config, l
 from blade_defect.utils.paths import resolve_model_reference, resolve_path
 from .config import ExperimentConfig
 from .exporter import export_summary
+from .failure_cases import export_failure_cases
+from .prediction_exporter import export_validation_predictions
 from .registry import EXPERIMENTS
 
 
@@ -157,8 +159,24 @@ def run_all_experiments(
                 raise
         else:
             save_json(record, experiment_dir / "metrics.json")
+            try:
+                predictions_path = experiment_dir / "validation_predictions.json"
+                export_validation_predictions(
+                    model_path=best_model if best_model.exists() else model,
+                    data_yaml=data_path,
+                    output_path=predictions_path,
+                    experiment_id=experiment.name,
+                    imgsz=experiment.imgsz,
+                    device=device,
+                )
+            except Exception:
+                pass
         records.append(record)
     export_summary(output_root, results_file)
+    try:
+        export_failure_cases(output_root, results_file.parent / "failure_cases" / "cases.csv")
+    except Exception:
+        pass
     return records
 
 

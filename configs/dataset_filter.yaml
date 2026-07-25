@@ -1,0 +1,194 @@
+version: 1
+
+issue_types:
+  - corrupted_file
+  - missing_label
+  - wrong_label
+  - uncertain_annotation
+  - incomplete_target
+  - wrong_component
+  - low_quality
+  - empty_scene
+  - duplicate
+  - other
+
+actions:
+  - exclude
+  - review
+  - keep_negative
+
+images:
+  - filename: DJI_20230709150645_0005_Z.JPG
+    action: exclude
+    issue: missing_label
+    reason: 可见疑似类别14接闪器脱落，但缺少标注工具生成的多边形标签和坐标
+    status: confirmed
+
+  - filename: DJI_20230709150649_0006_Z.JPG
+    action: exclude
+    issue: missing_label
+    reason: 可见疑似类别14接闪器脱落，但缺少标注工具生成的多边形标签和坐标
+    status: confirmed
+
+  - filename: DJI_20230709150652_0007_Z.JPG
+    action: exclude
+    issue: incomplete_target
+    reason: 疑似接闪器脱落区域只在画面边缘露出一部分，无法可靠标注
+    status: confirmed
+
+  - filename: DJI_20230709150656_0008_Z.JPG
+    action: keep_negative
+    reason: 复查未发现可辨识损伤，作为无缺陷负样本保留
+    status: confirmed
+
+  - filename: DJI_20230709150700_0009_Z.JPG
+    action: keep_negative
+    reason: 复查未发现可辨识损伤，作为无缺陷负样本保留
+    status: confirmed
+
+  - filename: DJI_20230709150704_0010_Z.JPG
+    action: keep_negative
+    reason: 复查未发现可辨识损伤，作为无缺陷负样本保留
+    status: confirmed
+
+  - filename: DJI_20230709150715_0013_Z.JPG
+    action: keep_negative
+    reason: 复查未发现可辨识损伤，作为无缺陷负样本保留
+    status: confirmed
+
+  - filename: DJI_20230709150719_0014_Z.JPG
+    action: keep_negative
+    reason: 复查未发现可辨识损伤，作为无缺陷负样本保留
+    status: confirmed
+
+  - filename: DJI_20230709150918_0017_Z.JPG
+    action: exclude
+    issue: wrong_component
+    reason: 可见油污和掉漆的位置主要位于轮毂等非叶片主体，不纳入叶片缺陷数据集
+    status: confirmed
+
+  - filename: DJI_20230709151324_0006_Z.JPG
+    action: exclude
+    issue: missing_label
+    reason: 可见疑似类别14接闪器脱落，但缺少标注工具生成的多边形标签和坐标
+    status: confirmed
+
+  - filename: DJI_20230709151548_0016_Z.JPG
+    action: exclude
+    issue: wrong_component
+    reason: 可见掉漆的位置主要位于塔筒或轮毂等非叶片主体，不纳入叶片缺陷数据集
+    status: confirmed
+
+  - filename: DJI_20230709151613_0002_Z.JPG
+    action: exclude
+    issue: wrong_component
+    reason: 可见油污和掉漆的位置主要位于轮毂等非叶片主体，不纳入叶片缺陷数据集
+    status: confirmed
+
+  - filename: DJI_20230709151758_0001_Z.JPG
+    action: exclude
+    issue: empty_scene
+    reason: 画面几乎只有天空，没有可用于训练的有效叶片目标
+    status: confirmed
+
+  - filename: DJI_20230709151953_0005_Z.JPG
+    action: exclude
+    issue: missing_label
+    reason: 可见疑似类别14接闪器脱落，但缺少标注工具生成的多边形标签和坐标
+    status: confirmed
+
+  - filename: 1-1-1624237297505-DSC04868-3194874.JPG
+    action: exclude
+    issue: corrupted_file
+    reason: 图片为0字节空文件，无法正常解码
+    status: confirmed
+
+  - filename: 1-2-1625431724710-DSC09602-2178010.JPG
+    action: exclude
+    issue: corrupted_file
+    reason: 图片为0字节空文件，无法正常解码
+    status: confirmed
+
+  - filename: 2-1-1624806242191-DSC05117-4818106.JPG
+    action: exclude
+    issue: corrupted_file
+    reason: 文件扩展名为JPG，但文件头不符合JPEG格式，无法正常解码
+    status: confirmed
+
+  - filename: 2-2-1626246749438-DSC09616-4722702.JPG
+    action: exclude
+    issue: corrupted_file
+    reason: 图片为0字节空文件，无法正常解码
+    status: confirmed
+
+  - filename: 2-2-1626247235666-DSC09614-5794246.JPG
+    action: exclude
+    issue: corrupted_file
+    reason: 图片为0字节空文件，无法正常解码
+    status: confirmed
+
+  - filename: 2-3-1624806242191-DSC05206-4433335.JPG
+    action: exclude
+    issue: corrupted_file
+    reason: 文件扩展名为JPG，但文件头不符合JPEG格式，无法正常解码
+    status: confirmed
+
+  - filename: 2-3-1624975363082-DSC00157-4691465.JPG
+    action: exclude
+    issue: corrupted_file
+    reason: 图片为0字节空文件，无法正常解码
+    status: confirmed
+
+  - filename: 3-2-1624806242191-DSC04968-2715279.JPG
+    action: exclude
+    issue: corrupted_file
+    reason: 文件扩展名为JPG，但文件头不符合JPEG格式，无法正常解码
+    status: confirmed
+
+  - filename: 1-2-1622895927797-DSC09591-2930805.JPG
+    action: exclude
+    issue: corrupted_file
+    reason: 图片为0字节空文件，无法正常解码
+    status: confirmed
+
+  - filename: 2-1-1624806242191-DSC05124-4356657.JPG
+    action: exclude
+    issue: corrupted_file
+    reason: 文件扩展名为JPG，但文件头不符合JPEG格式，无法正常解码
+    status: confirmed
+
+  - filename: 1-2-1628784338772-DSC00192-3182609.JPG
+    action: exclude
+    issue: corrupted_file
+    reason: 文件头可读取，但完整像素解码出现broken data stream，不能用于严格训练数据集
+    status: confirmed
+
+  - filename: 2-0-1625359418391-DSC05818-4759204.JPG
+    action: exclude
+    issue: corrupted_file
+    reason: 文件头可读取，但完整像素解码发现截断数据，不能用于严格训练数据集
+    status: confirmed
+
+  - filename: 2-3-1625444228986-DSC00119-5489925.JPG
+    action: exclude
+    issue: corrupted_file
+    reason: 文件头可读取，但完整像素解码发现截断数据，不能用于严格训练数据集
+    status: confirmed
+
+  - filename: 3-0-1628878914209-DSC07846-5403346.JPG
+    action: exclude
+    issue: corrupted_file
+    reason: 文件头可读取，但完整像素解码出现broken data stream，不能用于严格训练数据集
+    status: confirmed
+
+  - filename: 3-2-1624812364770-DSC00821-3088831.JPG
+    action: exclude
+    issue: corrupted_file
+    reason: 文件头可读取，但完整像素解码发现截断数据，不能用于严格训练数据集
+    status: confirmed
+
+  - filename: 3-0-1625416207425-DSC04496-5053997.JPG
+    action: exclude
+    issue: corrupted_file
+    reason: 文件头可读取，但完整像素解码发现截断数据，不能用于严格训练数据集
+    status: confirmed

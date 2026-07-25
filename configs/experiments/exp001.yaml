@@ -1,0 +1,9 @@
+name: exp001_yolov8n_seg_640
+model: yolov8n-seg.pt
+imgsz: 640
+epochs: 50
+batch: 8
+seed: 42
+notes: >
+  轻量 baseline，使用 YOLOv8n-seg 在 640 分辨率下训练。
+  用于验证数据管道和实验框架是否正确联通。

@@ -9,7 +9,7 @@ from typing import Any
 
 from blade_defect.data import check_dataset, clean_dataset, split_dataset
 from blade_defect.evaluation import AblationRunner, metrics_from_ultralytics
-from blade_defect.experiment import analyze_experiments, export_summary, run_all_experiments
+from blade_defect.experiment import analyze_experiments, export_summary, run_all_experiments, export_failure_cases, export_validation_predictions
 from blade_defect.models import SegmentationPredictor, SegmentationTrainer
 from blade_defect.utils import resolve_model_reference, resolve_path, setup_logging
 from blade_defect.utils.files import save_json
@@ -76,6 +76,11 @@ def build_parser() -> argparse.ArgumentParser:
     split.add_argument("--ratios", nargs=3, type=float, default=(0.7, 0.2, 0.1))
     split.add_argument("--seed", type=int, default=42)
     split.add_argument("--move", action="store_true")
+    split.add_argument(
+        "--filter-config",
+        type=resolve_path,
+        help="可选；按文件名执行排除、复核和负样本保留规则",
+    )
 
     train = subparsers.add_parser("train")
     train.add_argument("--config", default="configs/train.yaml", type=resolve_path)
@@ -131,6 +136,17 @@ def build_parser() -> argparse.ArgumentParser:
     analyze.add_argument("--summary", default="results/summary.csv", type=resolve_path)
     analyze.add_argument("--runs-dir", default="runs", type=resolve_path)
     analyze.add_argument("--output-dir", default="results/analysis", type=resolve_path)
+    failures = experiment_commands.add_parser("failures", help="导出失败案例 CSV")
+    failures.add_argument("--runs-dir", default="runs", type=resolve_path)
+    failures.add_argument("--output", default="results/failure_cases/cases.csv", type=resolve_path)
+    failures.add_argument("--error-only", action="store_true", help="仅导出错误案例，不含 matched 记录")
+    predictions = experiment_commands.add_parser("predictions", help="导出一个实验的逐样本预测")
+    predictions.add_argument("--model", required=True, type=resolve_model_reference)
+    predictions.add_argument("--data", required=True, type=resolve_path)
+    predictions.add_argument("--experiment-id", required=True)
+    predictions.add_argument("--output", required=True, type=resolve_path)
+    predictions.add_argument("--imgsz", type=int, default=640)
+    predictions.add_argument("--device", default="0")
     return parser
 
 
@@ -160,7 +176,13 @@ def main() -> None:
         print(json.dumps(payload, ensure_ascii=False, indent=2))
     elif args.command == "split":
         counts = split_dataset(
-            args.images, args.labels, args.output, tuple(args.ratios), args.seed, copy=not args.move
+            args.images,
+            args.labels,
+            args.output,
+            tuple(args.ratios),
+            args.seed,
+            copy=not args.move,
+            filter_config=args.filter_config,
         )
         print(json.dumps(counts, ensure_ascii=False, indent=2))
     elif args.command == "train":
@@ -190,6 +212,16 @@ def main() -> None:
         elif args.experiment_command == "analyze":
             outputs = analyze_experiments(args.summary, args.runs_dir, args.output_dir)
             print(json.dumps([str(path) for path in outputs], ensure_ascii=False, indent=2))
+        elif args.experiment_command == "failures":
+            result = export_failure_cases(args.runs_dir, args.output, error_only=args.error_only)
+            print(result)
+        elif args.experiment_command == "predictions":
+            result = export_validation_predictions(
+                args.model, args.data, args.output,
+                experiment_id=args.experiment_id,
+                imgsz=args.imgsz, device=args.device,
+            )
+            print(result)
 
 
 if __name__ == "__main__":

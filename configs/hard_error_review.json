@@ -1,0 +1,7 @@
+{
+  "version": 1,
+  "review_time": "2026-07-23T16:30:00+08:00",
+  "default_decision": "repair_confirmed",
+  "default_reason": "原图与局部放大图显示，多边形与可见缺陷区域及类别一致，越界顶点位于图像边缘外侧；将越界坐标限制到[0,1]可保留图中可见缺陷形状，未发现需要整图排除的明显错标。",
+  "exceptions": []
+}

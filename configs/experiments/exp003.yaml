@@ -1,0 +1,7 @@
+name: exp003_yolo11n_seg_640
+model: yolo11n-seg.pt
+imgsz: 640
+epochs: 50
+batch: 8
+seed: 42
+notes: YOLO11n-seg 640 baseline，新一代 nano 模型

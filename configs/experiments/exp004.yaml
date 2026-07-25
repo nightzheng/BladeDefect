@@ -1,0 +1,7 @@
+name: exp004_yolo11s_seg_640
+model: yolo11s-seg.pt
+imgsz: 640
+epochs: 50
+batch: 8
+seed: 42
+notes: YOLO11s-seg 640 baseline，新一代 small 模型

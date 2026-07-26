@@ -50,7 +50,7 @@ def test_experiment_cli_commands_parse() -> None:
     assert build_parser().parse_args(["experiment", "analyze"]).experiment_command == "analyze"
 
 
-def test_analyze_experiments_generates_publication_plots(tmp_path: Path) -> None:
+def test_analyze_experiments_generates_expanded_artifacts(tmp_path: Path) -> None:
     results = tmp_path / "results"
     results.mkdir()
     summary = results / "summary.csv"
@@ -70,10 +70,12 @@ def test_analyze_experiments_generates_publication_plots(tmp_path: Path) -> None
 
     outputs = analyze_experiments(summary, tmp_path / "runs", results / "analysis")
 
-    assert {path.name for path in outputs} == {
-        "summary_plot.png", "pr_curve.png", "class_distribution.png",
-        "loss_curve_comparison.png",
+    core_expected = {
+        "model_comparison.csv", "per_class_metrics.csv", "model_comparison.png",
+        "input_size_map.png", "input_size_fps.png", "pr_curve.png", "f1_curve.png",
+        "confusion_matrix.png", "class_distribution.png", "loss_curve_comparison.png",
     }
+    assert core_expected.issubset({path.name for path in outputs})
     assert all(path.stat().st_size > 0 for path in outputs)
 
 

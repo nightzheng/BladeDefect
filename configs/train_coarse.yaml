@@ -1,0 +1,15 @@
+﻿project_root: ..
+model: yolo11s-seg.pt
+data: D:\视觉缺陷\BladeDefect-main\datasets\blade-v2-6class\data.yaml
+epochs: 50
+imgsz: 960
+batch: 8
+device: auto
+workers: 4
+project: runs
+name: hier_coarse_yolo11s_seg_960
+patience: 30
+seed: 42
+pretrained: true
+cache: false
+amp: true

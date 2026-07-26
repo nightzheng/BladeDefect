@@ -1,0 +1,10 @@
+name: hier_coarse_yolo11s_seg_960
+model: yolo11s-seg.pt
+imgsz: 960
+epochs: 50
+batch: 8
+seed: 42
+notes: >
+  YOLO11s-seg 960 粗粒度 baseline，
+  将 15 类映射为 6 大类（表面腐蚀/表面裂纹/表面缺陷/维修痕迹/叶片损伤/附件脱落），
+  供层级识别可行性分析。

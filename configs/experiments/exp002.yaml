@@ -1,0 +1,7 @@
+name: exp002_yolov8s_seg_640
+model: yolov8s-seg.pt
+imgsz: 640
+epochs: 50
+batch: 8
+seed: 42
+notes: YOLOv8s-seg 640 baseline，参数量大于 v8n，预期精度提升但 FPS 下降

@@ -1,0 +1,7 @@
+name: exp007_yolo11n_seg_960
+model: yolo11n-seg.pt
+imgsz: 960
+epochs: 50
+batch: 8
+seed: 42
+notes: YOLO11n-seg 960 baseline

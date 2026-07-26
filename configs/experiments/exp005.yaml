@@ -1,0 +1,7 @@
+name: exp005_yolov8n_seg_960
+model: yolov8n-seg.pt
+imgsz: 960
+epochs: 50
+batch: 8
+seed: 42
+notes: YOLOv8n-seg 960 baseline

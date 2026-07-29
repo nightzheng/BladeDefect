@@ -116,6 +116,48 @@ def test_run_all_uses_original_dataset_yaml(
     assert train_call["workers"] == 2
     assert validate_call["data"] == data.resolve()
     assert validate_call["normalize_data_yaml"] is False
+    run_dir = tmp_path / "runs" / "exp_test"
+    manifest = json.loads((run_dir / "run_manifest.json").read_text(encoding="utf-8"))
+    environment = json.loads((run_dir / "environment.json").read_text(encoding="utf-8"))
+    assert manifest["experiment_id"] == "exp_test"
+    assert manifest["status"] == "completed"
+    assert manifest["dataset_id"] == tmp_path.name
+    assert manifest["git"]["tags_exact"] == []
+    assert manifest["config"]["effective"]["workers"] == 2
+    assert environment["python"]["version"]
+
+
+def test_run_manifest_records_training_failure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    data = tmp_path / "data.yaml"
+    data.write_text("train: images/train\nval: images/val\nnames: [defect]\n", encoding="utf-8")
+    config = tmp_path / "train.yaml"
+    config.write_text(f"data: {data.as_posix()}\n", encoding="utf-8")
+
+    class FailingTrainer:
+        def __init__(self, model: object) -> None:
+            raise RuntimeError("synthetic training failure")
+
+    monkeypatch.setattr(runner_module, "SegmentationTrainer", FailingTrainer)
+    records = runner_module.run_all_experiments(
+        [ExperimentConfig("exp_failed", "model.pt", epochs=1)],
+        config=config,
+        runs_dir=tmp_path / "runs",
+        results_file=tmp_path / "results" / "summary.csv",
+        skip_validation=True,
+    )
+
+    manifest = json.loads(
+        (tmp_path / "runs" / "exp_failed" / "run_manifest.json").read_text(encoding="utf-8")
+    )
+    assert records[0]["status"] == "failed"
+    assert manifest["status"] == "failed"
+    assert manifest["finished_at"]
+    assert manifest["error"] == {
+        "type": "RuntimeError",
+        "message": "synthetic training failure",
+    }
 
 
 def test_run_all_validation_gate_stops_before_training(

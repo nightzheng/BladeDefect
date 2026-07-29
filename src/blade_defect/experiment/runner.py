@@ -12,6 +12,15 @@ from blade_defect.utils.paths import resolve_model_reference, resolve_path
 from .config import ExperimentConfig
 from .exporter import export_summary
 from .failure_cases import export_failure_cases
+from .metadata import (
+    atomic_write_json,
+    collect_dataset_metadata,
+    collect_environment_metadata,
+    collect_git_metadata,
+    create_run_manifest,
+    sha256_file,
+    utc_timestamp,
+)
 from .prediction_exporter import export_validation_predictions
 from .registry import EXPERIMENTS
 
@@ -119,7 +128,8 @@ def run_all_experiments(
 ) -> list[dict[str, Any]]:
     """使用同一份训练配置依次训练并评估筛选后的 baseline。"""
     selected_experiments = _select_experiments(experiments, imgsz, experiment_selectors)
-    base_config, project_root = load_project_config(config)
+    config_path = resolve_path(config)
+    base_config, project_root = load_project_config(config_path)
     base_config.pop("model", None)
     data_path = resolve_path(base_config.get("data", "configs/data.yaml"), project_root)
     dataset_config = load_yaml(data_path)
@@ -129,17 +139,43 @@ def run_all_experiments(
     if not skip_validation:
         _validate_dataset(data_path)
     output_root = resolve_path(runs_dir)
+    results_path = resolve_path(results_file)
+    git_metadata = collect_git_metadata(project_root)
+    environment_metadata = collect_environment_metadata()
+    dataset_metadata = collect_dataset_metadata(data_path)
     records: list[dict[str, Any]] = []
     for experiment in selected_experiments:
         experiment_dir = output_root / experiment.name
+        experiment_dir.mkdir(parents=True, exist_ok=True)
+        model = resolve_model_reference(experiment.model, project_root)
+        # 所有实验继承同一份 train.yaml；注册表只覆盖模型对比参数和输出路径。
+        train_kwargs = {
+            **base_config,
+            **experiment.training_kwargs(data_path, output_root, device),
+        }
+        manifest_path = experiment_dir / "run_manifest.json"
+        environment_path = experiment_dir / "environment.json"
+        manifest = create_run_manifest(
+            experiment=experiment.to_dict(),
+            effective_config=train_kwargs,
+            config_path=config_path,
+            model=model,
+            requested_device=device,
+            git=git_metadata,
+            dataset=dataset_metadata,
+            environment=environment_metadata,
+        )
+        atomic_write_json(environment_path, environment_metadata)
+        atomic_write_json(manifest_path, manifest)
+        provenance = {
+            "run_id": manifest["run_id"],
+            "dataset_id": dataset_metadata["dataset_id"],
+            "dataset_hash": dataset_metadata["dataset_hash"],
+            "commit": git_metadata["commit"],
+            "tags": git_metadata["tags_exact"],
+        }
         try:
-            model = resolve_model_reference(experiment.model, project_root)
             trainer = SegmentationTrainer(model)
-            # 所有实验继承同一份 train.yaml；注册表只覆盖模型对比参数和输出路径。
-            train_kwargs = {
-                **base_config,
-                **experiment.training_kwargs(data_path, output_root, device),
-            }
             train_result = trainer.train(normalize_data_yaml=False, **train_kwargs)
             save_dir = Path(getattr(train_result, "save_dir", None) or experiment_dir)
             # 优先评估训练得到的 best.pt；测试替身或中断场景下回退到原模型。
@@ -153,12 +189,25 @@ def run_all_experiments(
                       "mAP50-95": metrics.map50_95, "precision": metrics.precision,
                       "recall": metrics.recall, "fps": _fps_from_result(raw_result), "status": "ok"}
         except Exception as exc:
-            record = {**experiment.to_dict(), "status": "failed", "error": str(exc)}
+            record = {
+                **experiment.to_dict(), **provenance,
+                "status": "failed", "error": str(exc),
+            }
             save_json(record, experiment_dir / "metrics.json")
+            manifest.update({
+                "status": "failed",
+                "finished_at": utc_timestamp(),
+                "error": {"type": type(exc).__name__, "message": str(exc)},
+                "artifacts": {"metrics": str(experiment_dir / "metrics.json")},
+            })
+            atomic_write_json(manifest_path, manifest)
             if not continue_on_error:
                 raise
         else:
+            record.update(provenance)
             save_json(record, experiment_dir / "metrics.json")
+            prediction_error: str | None = None
+            predictions_path: Path | None = None
             try:
                 predictions_path = experiment_dir / "validation_predictions.json"
                 export_validation_predictions(
@@ -167,14 +216,33 @@ def run_all_experiments(
                     output_path=predictions_path,
                     experiment_id=experiment.name,
                     imgsz=experiment.imgsz,
-                    device=device,
+                    device=str(device) if device is not None else "cpu",
                 )
-            except Exception:
-                pass
+            except Exception as exc:
+                prediction_error = f"{type(exc).__name__}: {exc}"
+            artifacts: dict[str, Any] = {
+                "run_directory": str(save_dir),
+                "metrics": str(experiment_dir / "metrics.json"),
+                "environment": str(environment_path),
+                "best_weights": str(best_model) if best_model.exists() else None,
+                "best_weights_sha256": sha256_file(best_model) if best_model.exists() else None,
+                "validation_predictions": (
+                    str(predictions_path) if predictions_path is not None and predictions_path.exists() else None
+                ),
+            }
+            manifest.update({
+                "status": "completed",
+                "finished_at": utc_timestamp(),
+                "metrics": record,
+                "artifacts": artifacts,
+                "warnings": ([{"stage": "prediction_export", "message": prediction_error}]
+                             if prediction_error else []),
+            })
+            atomic_write_json(manifest_path, manifest)
         records.append(record)
-    export_summary(output_root, results_file)
+    export_summary(output_root, results_path)
     try:
-        export_failure_cases(output_root, results_file.parent / "failure_cases" / "cases.csv")
+        export_failure_cases(output_root, results_path.parent / "failure_cases" / "cases.csv")
     except Exception:
         pass
     return records

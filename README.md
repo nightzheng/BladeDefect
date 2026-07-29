@@ -2,6 +2,7 @@
 
 > 自动化 baseline 实验、结果汇总与论文图表说明见
 > [docs/EXPERIMENTS.md](docs/EXPERIMENTS.md)。
+> 实验版本、数据哈希和运行环境追溯规则见 [docs/experiment_registry.md](docs/experiment_registry.md)。
 
 面向风机叶片无人机巡检的 YOLO segmentation 缺陷检测工程模板。项目支持
 Ultralytics YOLOv8/YOLO11 的训练、验证与推理，并为后续 RGB-T 配准和融合预留接口。

@@ -12,6 +12,7 @@ from .defect_classes import (
 from .label_check import DatasetCheckReport, check_dataset, clamp01
 from .obb_check import OBBDatasetIssue, OBBDatasetReport, check_obb_dataset
 from .split import split_dataset
+from .validation import DatasetGateError, DatasetGateReport, SplitGateReport, validate_dataset_gate
 
 __all__ = [
     "CleaningReport",
@@ -31,4 +32,8 @@ __all__ = [
     "OBBDatasetReport",
     "check_obb_dataset",
     "split_dataset",
+    "DatasetGateError",
+    "DatasetGateReport",
+    "SplitGateReport",
+    "validate_dataset_gate",
 ]

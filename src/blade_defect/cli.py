@@ -124,11 +124,6 @@ def build_parser() -> argparse.ArgumentParser:
         metavar="NAME_OR_ID",
         help="按完整名称或 ID 选择实验；可重复传入，例如 exp014 或 16",
     )
-    run_all.add_argument(
-        "--skip-validation",
-        action="store_true",
-        help="显式跳过训练前 strict dataset validation gate",
-    )
     summary = experiment_commands.add_parser("summary", help="重新生成实验汇总 CSV")
     summary.add_argument("--runs-dir", default="runs", type=resolve_path)
     summary.add_argument("--output", default="results/summary.csv", type=resolve_path)
@@ -204,7 +199,7 @@ def main() -> None:
         if args.experiment_command == "run-all":
             records = run_all_experiments(config=args.config, runs_dir=args.runs_dir,
                                           results_file=args.output, device=args.device,
-                                          skip_validation=args.skip_validation, imgsz=args.imgsz,
+                                          imgsz=args.imgsz,
                                           experiment_selectors=args.experiments)
             print(json.dumps(records, ensure_ascii=False, indent=2))
         elif args.experiment_command == "summary":

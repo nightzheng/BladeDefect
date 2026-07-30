@@ -7,7 +7,8 @@ from pathlib import Path
 from typing import Any
 from blade_defect.utils.paths import resolve_path
 
-SUMMARY_FIELDS = ["experiment name", "model", "mAP50", "mAP50-95", "precision", "recall", "fps"]
+SUMMARY_FIELDS = ["experiment name", "model", "dataset_id", "mAP50", "mAP50-95",
+                  "precision", "recall", "fps", "fps_method"]
 
 
 def _value(metrics: dict[str, Any], *names: str) -> Any:
@@ -25,10 +26,13 @@ def export_summary(runs_dir: str | Path = "runs",
         if metrics.get("status", "ok") != "ok":
             continue
         rows.append({"experiment name": _value(metrics, "name", "experiment name"),
-                     "model": _value(metrics, "model"), "mAP50": _value(metrics, "mAP50", "map50"),
+                     "model": _value(metrics, "model"),
+                     "dataset_id": _value(metrics, "dataset_id"),
+                     "mAP50": _value(metrics, "mAP50", "map50"),
                      "mAP50-95": _value(metrics, "mAP50-95", "map50_95"),
                      "precision": _value(metrics, "precision"), "recall": _value(metrics, "recall"),
-                     "fps": _value(metrics, "fps")})
+                     "fps": _value(metrics, "fps"),
+                     "fps_method": _value(metrics, "fps_method")})
     output_path.parent.mkdir(parents=True, exist_ok=True)
     with output_path.open("w", newline="", encoding="utf-8-sig") as file:
         writer = csv.DictWriter(file, fieldnames=SUMMARY_FIELDS)

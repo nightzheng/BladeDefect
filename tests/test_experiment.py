@@ -79,11 +79,30 @@ def test_analyze_experiments_generates_expanded_artifacts(tmp_path: Path) -> Non
     assert all(path.stat().st_size > 0 for path in outputs)
 
 
+def _build_minimal_dataset(root: Path) -> Path:
+    """构造一个能通过 strict 门禁的最小目录型数据集，返回 data.yaml 路径。"""
+    dataset = root / "dataset"
+    for split in ("train", "val"):
+        images_dir = dataset / "images" / split
+        labels_dir = dataset / "labels" / split
+        images_dir.mkdir(parents=True)
+        labels_dir.mkdir(parents=True)
+        images_dir.joinpath(f"{split}_0.jpg").write_bytes(b"\xff\xd8\xff")
+        labels_dir.joinpath(f"{split}_0.txt").write_text(
+            "0 0.1 0.1 0.2 0.1 0.2 0.2\n", encoding="utf-8"
+        )
+    data = root / "data.yaml"
+    data.write_text(
+        f"path: {dataset.as_posix()}\ntrain: images/train\nval: images/val\nnames: [defect]\n",
+        encoding="utf-8",
+    )
+    return data
+
+
 def test_run_all_uses_original_dataset_yaml(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    data = tmp_path / "data.yaml"
-    data.write_text("train: images/train\nval: images/val\nnames: [defect]\n", encoding="utf-8")
+    data = _build_minimal_dataset(tmp_path)
     config = tmp_path / "train.yaml"
     config.write_text(f"data: {data.as_posix()}\nworkers: 2\n", encoding="utf-8")
     calls: list[tuple[str, dict[str, object]]] = []
@@ -106,7 +125,6 @@ def test_run_all_uses_original_dataset_yaml(
     runner_module.run_all_experiments(
         [experiment], config=config, runs_dir=tmp_path / "runs",
         results_file=tmp_path / "results" / "summary.csv", continue_on_error=False,
-        skip_validation=True,
     )
 
     train_call = next(payload for kind, payload in calls if kind == "train")
@@ -121,7 +139,7 @@ def test_run_all_uses_original_dataset_yaml(
     environment = json.loads((run_dir / "environment.json").read_text(encoding="utf-8"))
     assert manifest["experiment_id"] == "exp_test"
     assert manifest["status"] == "completed"
-    assert manifest["dataset_id"] == tmp_path.name
+    assert manifest["dataset_id"] == "dataset"
     assert manifest["git"]["tags_exact"] == []
     assert manifest["config"]["effective"]["workers"] == 2
     assert environment["python"]["version"]
@@ -130,8 +148,7 @@ def test_run_all_uses_original_dataset_yaml(
 def test_run_manifest_records_training_failure(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    data = tmp_path / "data.yaml"
-    data.write_text("train: images/train\nval: images/val\nnames: [defect]\n", encoding="utf-8")
+    data = _build_minimal_dataset(tmp_path)
     config = tmp_path / "train.yaml"
     config.write_text(f"data: {data.as_posix()}\n", encoding="utf-8")
 
@@ -145,7 +162,6 @@ def test_run_manifest_records_training_failure(
         config=config,
         runs_dir=tmp_path / "runs",
         results_file=tmp_path / "results" / "summary.csv",
-        skip_validation=True,
     )
 
     manifest = json.loads(
@@ -184,7 +200,7 @@ def test_run_all_validation_gate_stops_before_training(
             raise AssertionError("training must not be initialized after validation failure")
 
     monkeypatch.setattr(runner_module, "SegmentationTrainer", UnexpectedTrainer)
-    with pytest.raises(runner_module.DatasetValidationError, match="missing_images=1"):
+    with pytest.raises(runner_module.DatasetValidationError, match="orphan_labels=1"):
         runner_module.run_all_experiments(
             [ExperimentConfig("blocked", "model.pt")],
             config=config,
@@ -193,11 +209,11 @@ def test_run_all_validation_gate_stops_before_training(
         )
 
 
-def test_run_all_cli_validation_is_enabled_by_default() -> None:
+def test_run_all_cli_has_no_skip_validation_flag() -> None:
     args = build_parser().parse_args(["experiment", "run-all"])
-    assert args.skip_validation is False
-    skipped = build_parser().parse_args(["experiment", "run-all", "--skip-validation"])
-    assert skipped.skip_validation is True
+    assert not hasattr(args, "skip_validation")
+    with pytest.raises(SystemExit):
+        build_parser().parse_args(["experiment", "run-all", "--skip-validation"])
 
 
 def test_run_all_filters_experiments_by_image_size(
@@ -217,8 +233,7 @@ def test_run_all_filters_experiments_by_image_size(
             metrics = SimpleNamespace(p=0.8, r=0.7, map50=0.6, map=0.5)
             return SimpleNamespace(seg=metrics, speed={"inference": 10.0})
 
-    data = tmp_path / "data.yaml"
-    data.write_text("train: images/train\nval: images/val\nnames: [defect]\n", encoding="utf-8")
+    data = _build_minimal_dataset(tmp_path)
     config = tmp_path / "train.yaml"
     config.write_text(f"data: {data.as_posix()}\n", encoding="utf-8")
     monkeypatch.setattr(runner_module, "SegmentationTrainer", FakeTrainer)
@@ -227,7 +242,6 @@ def test_run_all_filters_experiments_by_image_size(
         config=config,
         runs_dir=tmp_path / "runs",
         results_file=tmp_path / "summary.csv",
-        skip_validation=True,
         imgsz=960,
     )
 

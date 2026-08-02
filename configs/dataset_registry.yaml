@@ -1,0 +1,76 @@
+version: 1
+
+datasets:
+  blade-v2-sampled-4987:
+    purpose: sampled_experiment
+    status: historical
+    image_count: 4987
+    instance_count: null
+    splits:
+      train: null
+      val: null
+      test: null
+    label_hash: null
+    sample_list_hash: null
+    source_config: configs/data.yaml
+    generation_command: historical sampled experiment; preserved for experiment lineage
+    metadata_status: incomplete_historical
+    metadata_note: original instance, split and hash records were not preserved
+
+  blade-v2-full-frozen-48291:
+    purpose: full_frozen_source
+    status: frozen
+    dataset_dir: datasets/blade-v2
+    manifest: datasets/blade-v2/dataset_manifest.json
+    image_count: 48291
+    instance_count: 49471
+    splits:
+      train: 43463
+      val: 4828
+      test: 0
+    label_hash: 065efdfffe956800c25a85f70e3a5860a02c23cf7294a144a00db633ce53168c
+    sample_list_hash: bea593052c575ab677dd7e697a5876f109497948f106ef2da7fcbae1b5c80c8f
+    source_config: configs/dataset_filter.yaml
+    generation_command: >-
+      python scripts\freeze_dataset.py --images D:\images --labels D:\labels
+      --filter-config configs\dataset_filter.yaml
+      --hard-review results\dataset_review\hard_error_review.csv
+      --coordinate-csv results\dataset\out_of_bounds_coordinates.csv
+      --output datasets\blade-v2 --review-output results\dataset_review
+      --seed 42 --workers 16
+    metadata_status: complete
+
+  blade-v3-grouped:
+    purpose: grouped_split_candidate
+    status: candidate
+    source_dataset: blade-v2-full-frozen-48291
+    manifest: datasets/blade-v3-grouped/dataset_manifest.json
+    image_count: 48291
+    instance_count: 49471
+    splits:
+      train: 33804
+      val: 7244
+      test: 7243
+    split_ratio_target:
+      train: 0.70
+      val: 0.15
+      test: 0.15
+    split_policy: >-
+      exact SHA-256 duplicate groups first, otherwise sequence name plus fine
+      and coarse defect type; balance fine/coarse class and defect size;
+      no sample-level random split
+    policy_id: no_sample_level_random_split
+    seed: 42
+    label_hash: 065efdfffe956800c25a85f70e3a5860a02c23cf7294a144a00db633ce53168c
+    sample_list_hash: c488baa4b930d5e6055ed0a4d5db59b2f1435ebf6396765fb67eda5b62c9142b
+    source_manifest_hash: 3da5dd1a2dfd42c891c02268bd29f82ae08ad86d0bd4698cc81d33bd7d9a1ff6
+    metadata_status: complete_candidate
+    source_config: configs/dataset_registry.yaml
+    generation_command: >-
+      python scripts\build_grouped_split.py --dataset datasets\blade-v2
+      --data datasets\blade-v2\data.yaml --hierarchy configs\class_hierarchy.yaml
+      --registry-output results\dataset_registry
+      --split-output results\split_candidate
+      --manifest-output datasets\blade-v3-grouped
+      --hash-inventory results\dataset_registry\image_sha256.csv
+      --workers 8 --seed 42

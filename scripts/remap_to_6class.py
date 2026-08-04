@@ -11,6 +11,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import shutil
 from pathlib import Path
 
@@ -18,6 +19,7 @@ import yaml
 
 from blade_defect.data.class_hierarchy import fine_to_coarse, load_class_hierarchy
 from blade_defect.data import check_dataset, DEFECT_CLASSES
+from blade_defect.data.indexed_splits import load_indexed_splits, membership_hash
 from blade_defect.utils import resolve_path
 
 HIERARCHY_PATH = Path(__file__).resolve().parent.parent / "configs" / "class_hierarchy.yaml"
@@ -63,15 +65,62 @@ def _remap_label_file(src: Path, dst: Path, mapping: dict[int, int]) -> None:
     dst.write_text("\n".join(new_lines) + "\n", encoding="utf-8")
 
 
+def dry_run_index_check(source_data: str | Path) -> dict[str, object]:
+    """Verify that every indexed label is readable and maps from 15 to 6 classes."""
+    indexed = load_indexed_splits(source_data, ("train", "val", "test"))
+    mapping = _get_mapping()
+    errors: list[str] = []
+    instances = 0
+    for samples in indexed.values():
+        for sample in samples:
+            if not sample.image_path.is_file():
+                errors.append(f"missing image: {sample.sample_id}")
+                continue
+            if not sample.label_path.is_file():
+                errors.append(f"missing label: {sample.sample_id}")
+                continue
+            for line_number, raw_line in enumerate(sample.label_path.read_text(encoding="utf-8-sig").splitlines(), 1):
+                if not raw_line.strip():
+                    continue
+                try:
+                    class_id = int(raw_line.split()[0])
+                    mapping[class_id]
+                except (ValueError, KeyError, IndexError):
+                    errors.append(f"invalid class: {sample.sample_id}:{line_number}")
+                instances += 1
+    return {
+        "tool": "remap_to_6class",
+        "splits": {split: len(samples) for split, samples in indexed.items()},
+        "total_samples": sum(len(samples) for samples in indexed.values()),
+        "instances": instances,
+        "membership_sha256": membership_hash(indexed),
+        "errors": errors,
+        "valid": not errors,
+    }
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--source", required=True, type=resolve_path,
+    parser.add_argument("--source", type=resolve_path,
                         help="原始 15 类数据集根目录（含 images/ 和 labels/）")
-    parser.add_argument("--output", required=True, type=resolve_path,
+    parser.add_argument("--output", type=resolve_path,
                         help="6 类输出目录（必须为空）")
+    parser.add_argument("--source-data", type=Path, help="包含 train/val/test txt 清单的 data.yaml")
+    parser.add_argument("--dry-run-index-check", action="store_true", help="仅检查全量清单兼容性，不写文件")
     parser.add_argument("--copy-images", action="store_true",
                         help="复制图片；默认不复制，请手动在 images/ 下创建 junction")
     args = parser.parse_args()
+
+    if args.dry_run_index_check:
+        if args.source_data is None:
+            parser.error("--dry-run-index-check requires --source-data")
+        report = dry_run_index_check(args.source_data)
+        print(json.dumps(report, ensure_ascii=False, indent=2))
+        if not report["valid"]:
+            raise SystemExit(1)
+        return
+    if args.source is None or args.output is None:
+        parser.error("normal conversion requires --source and --output")
 
     source: Path = args.source
     output: Path = args.output

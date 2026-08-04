@@ -253,7 +253,10 @@ def build_sample_records(
     return records
 
 
-def group_records(records: list[SampleRecord]) -> dict[str, list[SampleRecord]]:
+def group_records(
+    records: list[SampleRecord],
+    confirmed_links: Path | list[Path] | None = None,
+) -> dict[str, list[SampleRecord]]:
     parent: dict[str, str] = {}
 
     def find(value: str) -> str:
@@ -273,6 +276,24 @@ def group_records(records: list[SampleRecord]) -> dict[str, list[SampleRecord]]:
         union(sample_key, record.sequence_group)
         if record.duplicate_group_id:
             union(sample_key, record.duplicate_group_id)
+    link_files = [confirmed_links] if isinstance(confirmed_links, Path) else (confirmed_links or [])
+    if link_files:
+        records_by_name: dict[str, list[SampleRecord]] = defaultdict(list)
+        for record in records:
+            records_by_name[record.image_path.name.casefold()].append(record)
+        for link_file in link_files:
+            if not link_file.is_file():
+                raise FileNotFoundError(f"confirmed links not found: {link_file}")
+            with link_file.open("r", encoding="utf-8-sig", newline="") as handle:
+                for row in csv.DictReader(handle):
+                    decision = row.get("manual_decision", row.get("decision", ""))
+                    if not decision.startswith("confirmed"):
+                        continue
+                    left = source_relative_image(row.get("image_a", ""), records_by_name)
+                    right = source_relative_image(row.get("image_b", ""), records_by_name)
+                    if not left or not right:
+                        raise ValueError(f"confirmed link could not be resolved: {row}")
+                    union(stable_id("sample", left), stable_id("sample", right))
     components: dict[str, list[SampleRecord]] = defaultdict(list)
     for record in records:
         component_keys = [record.sequence_group]
@@ -477,6 +498,53 @@ def assign_groups(groups: dict[str, list[SampleRecord]], seed: int = 42) -> dict
         stats[split]["coarse_instances"].update(group_stat["coarse_instances"])  # type: ignore[union-attr,arg-type]
         stats[split]["size_instances"].update(group_stat["size_instances"])  # type: ignore[union-attr,arg-type]
         stats[split]["class_size_instances"].update(group_stat["class_size_instances"])  # type: ignore[union-attr,arg-type]
+    return assignments
+
+
+def rebalance_exact_sample_counts(
+    groups: dict[str, list[SampleRecord]],
+    assignments: dict[str, str],
+    seed: int = 42,
+) -> dict[str, str]:
+    """Move whole groups to the largest-remainder ratio targets."""
+    total = sum(len(records) for records in groups.values())
+    raw_targets = {split: total * RATIOS[split] for split in SPLITS}
+    targets = {split: int(raw_targets[split]) for split in SPLITS}
+    remaining = total - sum(targets.values())
+    remainder_order = sorted(
+        SPLITS,
+        key=lambda split: (-(raw_targets[split] - targets[split]), SPLITS.index(split)),
+    )
+    for split in remainder_order[:remaining]:
+        targets[split] += 1
+
+    counts = Counter()
+    for group_id, split in assignments.items():
+        counts[split] += len(groups[group_id])
+    while counts != Counter(targets):
+        deficits = [split for split in SPLITS if counts[split] < targets[split]]
+        surpluses = [split for split in SPLITS if counts[split] > targets[split]]
+        if not deficits or not surpluses:
+            break
+        destination = max(deficits, key=lambda split: targets[split] - counts[split])
+        needed = targets[destination] - counts[destination]
+        candidates = [
+            group_id
+            for group_id, split in assignments.items()
+            if split in surpluses
+            and len(groups[group_id]) <= needed
+            and counts[split] - len(groups[group_id]) >= targets[split]
+        ]
+        if not candidates:
+            raise ValueError(f"cannot reach exact split counts without splitting groups: current={dict(counts)}, target={targets}")
+        group_id = min(
+            candidates,
+            key=lambda value: (-len(groups[value]), stable_id("rebalance", f"{seed}|{value}|{destination}")),
+        )
+        source = assignments[group_id]
+        assignments[group_id] = destination
+        counts[source] -= len(groups[group_id])
+        counts[destination] += len(groups[group_id])
     return assignments
 
 
@@ -887,8 +955,9 @@ def write_manifest(
     for record in sorted(records, key=lambda item: item.relative_image):
         label_digest.update(record.relative_image.encode("utf-8"))
         label_digest.update(file_hash(record.label_path).encode("ascii"))
+    split_output_ref = split_output.as_posix() if not split_output.is_absolute() else split_output.name
     manifest = {
-        "dataset_id": "blade-v3-grouped",
+        "dataset_id": getattr(args, "dataset_id", "blade-v3-grouped"),
         "generated_at": datetime.now(ZoneInfo("Asia/Shanghai")).isoformat(),
         "source_dataset": "datasets/blade-v2",
         "source_dataset_id": "blade-v2-full-frozen-48291",
@@ -896,7 +965,7 @@ def write_manifest(
         "source_dataset_manifest_sha256": file_hash(dataset / "dataset_manifest.json"),
         "purpose": "grouped_split_candidate",
         "split_policy": (
-            "grouped_by_exact_sha256_or_sequence_name_and_defect_type; "
+            "grouped_by_exact_sha256_or_sequence_name_and_defect_type_or_confirmed_adjacent_capture; "
             "group-level deterministic stratification by fine/coarse class and defect size; "
             "no sample-level random split"
         ),
@@ -911,11 +980,11 @@ def write_manifest(
         "generation_command": args.command,
         "balance_summary": balance_report,
         "outputs": {
-            "train": "results/split_candidate/train.txt",
-            "val": "results/split_candidate/val.txt",
-            "test": "results/split_candidate/test.txt",
-            "group_summary": "results/split_candidate/split_group_summary.csv",
-            "sample_group_assignments": "results/split_candidate/sample_group_assignments.csv",
+            "train": f"{split_output_ref}/train.txt",
+            "val": f"{split_output_ref}/val.txt",
+            "test": f"{split_output_ref}/test.txt",
+            "group_summary": f"{split_output_ref}/split_group_summary.csv",
+            "sample_group_assignments": f"{split_output_ref}/sample_group_assignments.csv",
         },
     }
     (output / "dataset_manifest.json").write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
@@ -967,8 +1036,10 @@ def build_grouped_split(args: argparse.Namespace) -> dict[str, object]:
     hash_inventory = getattr(args, "hash_inventory", None)
     leakage_source = getattr(args, "leakage_source", Path("results/dataset_review/split_leakage_review.csv"))
     records = build_sample_records(args.dataset, class_to_group, args.workers, hash_inventory)
-    groups = group_records(records)
+    confirmed_links = getattr(args, "confirmed_links", None)
+    groups = group_records(records, confirmed_links)
     assignments = assign_groups(groups, seed=args.seed)
+    assignments = rebalance_exact_sample_counts(groups, assignments, seed=args.seed)
     write_sample_lists(args.split_output, assignments, groups)
     write_group_summary(args.split_output / "split_group_summary.csv", assignments, groups)
     write_sample_group_assignments(args.split_output / "sample_group_assignments.csv", assignments, groups)
@@ -1027,12 +1098,14 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--registry-output", type=Path, default=Path("results/dataset_registry"))
     parser.add_argument("--split-output", type=Path, default=Path("results/split_candidate"))
     parser.add_argument("--manifest-output", type=Path, default=Path("datasets/blade-v3-grouped"))
+    parser.add_argument("--dataset-id", default="blade-v3-grouped")
     parser.add_argument("--hash-inventory", type=Path, default=Path("results/dataset_registry/image_sha256.csv"))
     parser.add_argument(
         "--leakage-source",
         type=Path,
         default=Path("results/dataset_review/split_leakage_review.csv"),
     )
+    parser.add_argument("--confirmed-links", type=Path, action="append", help="review CSV containing confirmed adjacent-capture links; repeatable")
     parser.add_argument("--workers", type=int, default=8)
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--command", default="python scripts/build_grouped_split.py")

@@ -5,6 +5,7 @@ import csv
 import hashlib
 import json
 import platform
+from importlib.metadata import PackageNotFoundError, version
 import subprocess
 import sys
 from datetime import datetime, timezone
@@ -91,10 +92,8 @@ def _environment_info() -> dict[str, Any]:
     except ImportError:
         info["torch_version"] = None
     try:
-        import ultralytics
-
-        info["ultralytics_version"] = ultralytics.__version__
-    except ImportError:
+        info["ultralytics_version"] = version("ultralytics")
+    except PackageNotFoundError:
         info["ultralytics_version"] = None
     return info
 

@@ -26,6 +26,10 @@ from blade_defect.evaluation import (
     extended_metrics_from_ultralytics,
     per_class_metrics_from_ultralytics,
 )
+from blade_defect.experiment.metadata import (
+    atomic_write_json,
+    collect_environment_metadata,
+)
 from blade_defect.experiment.prediction_exporter import export_validation_predictions
 from blade_defect.experiment.runner import (
     _dataset_identity,
@@ -93,6 +97,9 @@ def run_primary(
     else:
         model_source = resolve_model_reference(model_ref, project_root)
 
+    environment_path = run_dir / "environment.json"
+    atomic_write_json(environment_path, collect_environment_metadata())
+
     started_at = _now_iso()
     manifest = {
         "experiment_id": name,
@@ -110,7 +117,9 @@ def run_primary(
     save_json(manifest, manifest_path)
 
     train_kwargs = {
-        key: value for key, value in train_config.items() if key not in {"model", "notes"}
+        key: value
+        for key, value in train_config.items()
+        if key not in {"model", "notes", "label_level"}
     }
     # 强制保存目录与 run_dir 一致：--run-name 覆盖时 config 里的 name/project 会导致
     # 权重写到别的目录，使断点续训与 manifest/metrics 全部脱钩。

@@ -127,3 +127,36 @@ def test_export_rejects_missing_val(tmp_path: Path, monkeypatch: pytest.MonkeyPa
             output_path=tmp_path / "out.json",
             experiment_id="exp_test",
         )
+
+
+def test_export_txt_index_outside_dataset_root(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    pool = tmp_path / "blade-v2"
+    image = pool / "images" / "val" / "val_0.jpg"
+    image.parent.mkdir(parents=True, exist_ok=True)
+    image.write_bytes(b"\xff\xd8\xff")
+    pool_label = pool / "labels" / "val"
+    pool_label.mkdir(parents=True)
+    pool_label.joinpath("val_0.txt").write_text(VALID_LINE, encoding="utf-8")
+    release = tmp_path / "release"
+    release.mkdir()
+    release.joinpath("val.txt").write_text("../blade-v2/images/val/val_0.jpg\n", encoding="utf-8")
+    data = release / "data.yaml"
+    data.write_text(
+        "path: .\ntrain: train.txt\nval: val.txt\nnames: {0: 表面腐蚀, 1: 表面裂纹}\n",
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(exporter_module, "SegmentationPredictor", _FakePredictor)
+    output = export_validation_predictions(
+        model_path="model.pt",
+        data_yaml=data,
+        output_path=tmp_path / "out" / "validation_predictions.json",
+        experiment_id="exp_test",
+        imgsz=960,
+        device="cpu",
+    )
+    payload = json.loads(output.read_text(encoding="utf-8"))
+    assert payload["num_samples"] == 1
+    sample = payload["samples"][0]
+    assert sample["true_classes"] == [0]
+    assert sample["ground_truth"][0]["polygon"] == [0.1, 0.1, 0.2, 0.1, 0.2, 0.2]

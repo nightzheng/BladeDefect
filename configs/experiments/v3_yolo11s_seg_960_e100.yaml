@@ -1,0 +1,25 @@
+project_root: ../..
+model: yolo11s-seg.pt
+data: datasets/blade-v3-grouped-202608/data.yaml
+epochs: 100
+imgsz: 960
+batch: 8
+device: auto
+workers: 4
+project: runs
+name: v3_yolo11s_seg_960_e100
+patience: 30
+seed: 42
+pretrained: true
+cache: false
+amp: true
+val: true
+save: true
+save_period: 5
+exist_ok: true
+label_level: fine
+notes: >-
+  无泄漏主实验：blade-v3-grouped-202608（15 类），必须从官方 yolo11s-seg.pt
+  重新开始训练，禁止继承旧全量 split 的 best.pt（旧模型已见过部分新 val/test
+  样本）。训练只使用 train/val，test 锁定，正式 test 评估等待负责人批准。
+  启动前先运行 1 epoch 吞吐校准与 test split 隔离校验。

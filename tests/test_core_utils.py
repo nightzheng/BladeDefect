@@ -83,3 +83,28 @@ def test_runtime_data_yaml_has_absolute_dataset_root(tmp_path: Path) -> None:
         assert payload["path"] == dataset.resolve().as_posix()
 
     assert not Path(normalized).exists()
+
+
+def test_runtime_data_yaml_absolutizes_txt_list_entries(tmp_path: Path) -> None:
+    images = tmp_path / "blade-v2" / "images" / "train"
+    images.mkdir(parents=True)
+    dataset = tmp_path / "release"
+    dataset.mkdir()
+    (dataset / "train.txt").write_text("../blade-v2/images/train/a.jpg\n", encoding="utf-8")
+    (dataset / "val.txt").write_text("../blade-v2/images/train/b.jpg\n\n", encoding="utf-8")
+    source = dataset / "data.yaml"
+    source.write_text("path: .\ntrain: train.txt\nval: val.txt\ntest: test.txt\n", encoding="utf-8")
+
+    with resolved_data_yaml(source) as normalized:
+        payload = yaml.safe_load(Path(normalized).read_text(encoding="utf-8"))
+        train_list = Path(payload["train"])
+        assert train_list.read_text(encoding="utf-8").splitlines() == [
+            (images / "a.jpg").resolve().as_posix()
+        ]
+        assert Path(payload["val"]).read_text(encoding="utf-8").splitlines() == [
+            (images / "b.jpg").resolve().as_posix()
+        ]
+        assert payload["test"] == "test.txt"
+
+    assert not train_list.exists()
+    assert not Path(normalized).exists()

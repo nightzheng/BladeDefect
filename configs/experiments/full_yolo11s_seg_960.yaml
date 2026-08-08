@@ -1,6 +1,6 @@
 project_root: ../..
 model: yolo11s-seg.pt
-data: configs/data.yaml
+data: datasets/blade-v2/data.yaml
 epochs: 50
 imgsz: 960
 batch: 8

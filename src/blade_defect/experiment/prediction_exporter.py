@@ -62,6 +62,8 @@ def _val_image_entries(data_config: dict[str, Any]) -> list[tuple[Path, Path]]:
         raise FileNotFoundError("data.yaml 缺少 val 字段")
     val_path = Path(val_entry)
     if val_path.is_file() and val_path.suffix.lower() == ".txt":
+        # txt 清单型：图片/标签可位于 dataset_root 之外（如 v3 grouped 复用
+        # blade-v2 实体文件），标签逐张按 images→labels 约定推导。
         images = [
             _resolve_index_entry(dataset_root, line.strip())
             for line in val_path.read_text(encoding="utf-8").splitlines()
@@ -69,10 +71,10 @@ def _val_image_entries(data_config: dict[str, Any]) -> list[tuple[Path, Path]]:
         ]
     elif val_path.is_dir():
         images = _iter_images(val_path)
+        if not labels_dir.is_dir():
+            raise FileNotFoundError(f"val labels directory not found: {labels_dir}")
     else:
         raise FileNotFoundError(f"val images entry not found: {val_entry}")
-    if not labels_dir.is_dir():
-        raise FileNotFoundError(f"val labels directory not found: {labels_dir}")
     return [(image, _label_path_for(dataset_root, image, "val")) for image in images]
 
 

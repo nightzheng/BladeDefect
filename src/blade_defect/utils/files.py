@@ -12,7 +12,7 @@ from typing import Any
 
 import yaml
 
-from .paths import posix_path, resolve_config_paths, resolve_path
+from .paths import posix_path, resolve_config_paths, resolve_path, user_path
 
 IMAGE_SUFFIXES = {".jpg", ".jpeg", ".png", ".bmp", ".tif", ".tiff", ".webp"}
 
@@ -92,16 +92,47 @@ def resolved_data_yaml(path: str | Path) -> Iterator[str]:
         return
 
     payload = load_yaml(source)
-    payload["path"] = posix_path(resolve_path(payload.get("path", "."), source.parent))
+    dataset_root = resolve_path(payload.get("path", "."), source.parent)
+    payload["path"] = posix_path(dataset_root)
+    temporary_files: list[Path] = []
+    for split in ("train", "val"):
+        entry = payload.get(split)
+        if not isinstance(entry, str) or not entry.lower().endswith(".txt"):
+            continue
+        list_path = resolve_path(entry, dataset_root)
+        if not list_path.is_file():
+            continue
+        lines: list[str] = []
+        with list_path.open("r", encoding="utf-8") as file:
+            for raw_line in file.read().splitlines():
+                item = raw_line.strip()
+                if not item:
+                    continue
+                item_path = user_path(item)
+                if not item_path.is_absolute():
+                    # 与 validation._abspath 一致：只做字符串规范化，不解析
+                    # 符号链接/NTFS junction（避免路径身份跑到数据集根之外），
+                    # 也不产生每个条目一次的文件系统调用。
+                    item_path = Path(os.path.abspath(os.fspath(list_path.parent / item_path)))
+                lines.append(posix_path(item_path))
+        list_descriptor, temporary_list_name = tempfile.mkstemp(suffix=".txt")
+        os.close(list_descriptor)
+        temporary_list = Path(temporary_list_name)
+        temporary_list.write_text("\n".join(lines) + "\n", encoding="utf-8", newline="\n")
+        temporary_files.append(temporary_list)
+        payload[split] = posix_path(temporary_list)
+
     descriptor, temporary_name = tempfile.mkstemp(suffix=source.suffix)
     os.close(descriptor)
     temporary = Path(temporary_name)
+    temporary_files.append(temporary)
     try:
         with temporary.open("w", encoding="utf-8", newline="\n") as file:
             yaml.safe_dump(payload, file, allow_unicode=True, sort_keys=False)
         yield str(temporary)
     finally:
-        temporary.unlink(missing_ok=True)
+        for temporary_file in temporary_files:
+            temporary_file.unlink(missing_ok=True)
 
 
 def save_json(data: Any, path: str | Path) -> Path:

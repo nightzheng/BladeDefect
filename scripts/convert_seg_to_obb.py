@@ -17,6 +17,7 @@ import yaml
 from PIL import Image
 
 from blade_defect.data import DEFECT_CLASSES
+from blade_defect.data.indexed_splits import load_indexed_splits, membership_hash
 
 
 IMAGE_SUFFIXES = {".bmp", ".jpeg", ".jpg", ".png", ".tif", ".tiff", ".webp"}
@@ -29,6 +30,19 @@ IssueRow = dict[str, Any]
 
 
 WarningRecord = tuple[str, str, int]
+
+
+class ConditionalSourceParser(argparse.ArgumentParser):
+    """Require conversion paths unless txt-index dry-run mode is selected."""
+
+    def parse_args(self, args: Sequence[str] | None = None, namespace: argparse.Namespace | None = None) -> argparse.Namespace:
+        parsed = super().parse_args(args, namespace)
+        if parsed.dry_run_index_check:
+            if parsed.source_data is None:
+                self.error("--dry-run-index-check requires --source-data")
+        elif parsed.source is None or parsed.output is None:
+            self.error("normal conversion requires --source and --output")
+        return parsed
 
 
 class PolygonConversionError(ValueError):
@@ -300,6 +314,46 @@ def _split_issue_statistics(rows: list[IssueRow]) -> dict[str, int]:
     }
 
 
+def dry_run_index_check(source_data: str | Path, *, min_area: float = DEFAULT_MIN_AREA) -> dict[str, object]:
+    """Validate all indexed segmentation labels without writing an OBB dataset."""
+    indexed = load_indexed_splits(source_data, ("train", "val", "test"))
+    errors: list[str] = []
+    source_instances = 0
+    converted_instances = 0
+    for split, samples in indexed.items():
+        for sample in samples:
+            if not sample.image_path.is_file():
+                errors.append(f"missing image: {sample.sample_id}")
+                continue
+            if not sample.label_path.is_file():
+                errors.append(f"missing label: {sample.sample_id}")
+                continue
+            label_text = sample.label_path.read_text(encoding="utf-8-sig")
+            source_instances += sum(1 for line in label_text.splitlines() if line.split())
+            _, issues, converted = convert_label_text(
+                label_text,
+                split=split,
+                relative_label=Path(sample.sample_id).with_suffix(".txt"),
+                min_area=min_area,
+            )
+            converted_instances += converted
+            errors.extend(
+                f"{sample.sample_id}:{row['line']}:{row['reason']}"
+                for row in issues
+                if row["severity"] == "error"
+            )
+    return {
+        "tool": "convert_seg_to_obb",
+        "splits": {split: len(samples) for split, samples in indexed.items()},
+        "total_samples": sum(len(samples) for samples in indexed.values()),
+        "source_instances": source_instances,
+        "converted_instances": converted_instances,
+        "membership_sha256": membership_hash(indexed),
+        "errors": errors,
+        "valid": not errors and converted_instances == source_instances,
+    }
+
+
 def convert_dataset(
     source: str | Path,
     output: str | Path,
@@ -497,9 +551,11 @@ def convert_dataset(
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--source", required=True, type=Path, help="YOLO-seg dataset root")
-    parser.add_argument("--output", required=True, type=Path, help="new YOLO-OBB dataset root")
+    parser = ConditionalSourceParser(description=__doc__)
+    parser.add_argument("--source", type=Path, help="YOLO-seg dataset root")
+    parser.add_argument("--output", type=Path, help="new YOLO-OBB dataset root")
+    parser.add_argument("--source-data", type=Path, help="data.yaml backed by train/val/test txt indexes")
+    parser.add_argument("--dry-run-index-check", action="store_true", help="check all indexed labels without writing files")
     parser.add_argument("--results", type=Path, default=Path("results/obb"))
     parser.add_argument("--min-area", type=float, default=DEFAULT_MIN_AREA)
     parser.add_argument("--limit", type=int, help="maximum images per split (tests only)")
@@ -511,6 +567,16 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main() -> None:
     args = build_parser().parse_args()
+    if args.dry_run_index_check:
+        if args.source_data is None:
+            raise SystemExit("--dry-run-index-check requires --source-data")
+        report = dry_run_index_check(args.source_data, min_area=args.min_area)
+        print(json.dumps(report, ensure_ascii=False, indent=2))
+        if not report["valid"]:
+            raise SystemExit(1)
+        return
+    if args.source is None or args.output is None:
+        raise SystemExit("normal conversion requires --source and --output")
     source = args.source.resolve()
     output = args.output.resolve()
     results = args.results.resolve()

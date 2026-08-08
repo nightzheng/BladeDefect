@@ -42,7 +42,7 @@ datasets:
 
   blade-v3-grouped:
     purpose: grouped_split_candidate
-    status: candidate
+    status: superseded_after_audit
     source_dataset: blade-v2-full-frozen-48291
     manifest: datasets/blade-v3-grouped/dataset_manifest.json
     image_count: 48291
@@ -65,6 +65,9 @@ datasets:
     sample_list_hash: c488baa4b930d5e6055ed0a4d5db59b2f1435ebf6396765fb67eda5b62c9142b
     source_manifest_hash: 3da5dd1a2dfd42c891c02268bd29f82ae08ad86d0bd4698cc81d33bd7d9a1ff6
     metadata_status: complete_candidate
+    audit_note: >-
+      Initial release gate found 47 same-fine-class adjacent capture pairs
+      crossing final splits. This candidate was preserved unchanged and was not released.
     source_config: configs/dataset_registry.yaml
     generation_command: >-
       python scripts\build_grouped_split.py --dataset datasets\blade-v2
@@ -74,3 +77,35 @@ datasets:
       --manifest-output datasets\blade-v3-grouped
       --hash-inventory results\dataset_registry\image_sha256.csv
       --workers 8 --seed 42
+
+  blade-v3-grouped-202608:
+    purpose: immutable_grouped_release
+    status: released
+    source_dataset: blade-v2-full-frozen-48291
+    candidate_dataset: blade-v3-grouped-revised3
+    dataset_dir: datasets/blade-v3-grouped-202608
+    manifest: datasets/blade-v3-grouped-202608/dataset_manifest.json
+    image_count: 48291
+    label_count: 48291
+    instance_count: 49471
+    splits:
+      train: 33804
+      val: 7244
+      test: 7243
+    split_ratio_target:
+      train: 0.70
+      val: 0.15
+      test: 0.15
+    split_policy: >-
+      exact SHA-256 groups, filename-inferred sequence plus defect type, and
+      conservative closure over adjacent frames sharing a fine class;
+      deterministic group-level balancing with no sample-level random split
+    policy_id: grouped-v1
+    seed: 42
+    label_hash: 065efdfffe956800c25a85f70e3a5860a02c23cf7294a144a00db633ce53168c
+    membership_hash: 02a0251aeca30a4e8b332967c2124848955886a2550f75933cc1e38146dfc37b
+    sample_list_hash: 67e7589c38c222d269b6cfc8d7a19a6b83e6ef6588c6546a2d112cb81016a41f
+    test_list_hash: 51e72b8b0d1ac963b818e8b2c9b3f006c5716e85e49a289f32e92875096dc9d2
+    metadata_status: complete_released
+    test_status: locked
+    data_card: docs/dataset_card_blade_v3.md

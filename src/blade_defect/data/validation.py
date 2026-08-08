@@ -20,6 +20,7 @@ from pathlib import Path
 from typing import Any
 
 from blade_defect.utils.files import IMAGE_SUFFIXES, load_yaml
+from .indexed_splits import label_path_for_image, resolve_index_entry
 from .label_check import LabelIssue, _inspect_seg_line
 
 MAX_REPORTED_SAMPLES = 20
@@ -174,8 +175,10 @@ def _dataset_id(dataset_root: Path) -> str:
     return dataset_root.name
 
 
-def _resolve_index_entry(dataset_root: Path, raw_line: str) -> Path:
+def _resolve_index_entry(dataset_root: Path, raw_line: str, index_file: Path | None = None) -> Path:
     """解析 txt 索引行，兼容 ``./`` 前缀相对路径与绝对路径。"""
+    if index_file is not None:
+        return resolve_index_entry(index_file, raw_line)
     candidate = Path(raw_line)
     if candidate.is_absolute():
         return Path(os.path.normpath(os.fspath(candidate)))
@@ -184,6 +187,10 @@ def _resolve_index_entry(dataset_root: Path, raw_line: str) -> Path:
 
 def _label_path_for(dataset_root: Path, image_path: Path, split: str) -> Path:
     """按 images→labels 目录约定推导图片对应的标签路径。"""
+    try:
+        return label_path_for_image(image_path)
+    except ValueError:
+        pass
     try:
         relative = image_path.relative_to(dataset_root)
     except ValueError:
@@ -284,7 +291,7 @@ def _validate_txt_index_split(
         entry = raw_line.strip()
         if not entry:
             continue
-        image_path = _resolve_index_entry(dataset_root, entry)
+        image_path = _resolve_index_entry(dataset_root, entry, index_file)
         identity = str(image_path).casefold()
         if identity in seen:
             report.duplicates.append(f"line {line_number}: {entry} (first at line {seen[identity]})")
@@ -304,7 +311,17 @@ def _validate_txt_index_split(
             report.missing_labels.append(f"line {line_number}: {entry}")
             continue
         _check_label_file(label_path, label_path.name, num_classes, report)
-    _scan_orphan_labels(labels_dir, expected_keys, report)
+    # Orphan scanning is meaningful only when all indexed samples physically live
+    # in the target split. Grouped releases intentionally move membership without
+    # moving the frozen source files.
+    physical_split = f"{os.sep}images{os.sep}{split}{os.sep}".casefold()
+    indexed_paths = [
+        _resolve_index_entry(dataset_root, line.strip(), index_file)
+        for line in raw_lines
+        if line.strip()
+    ]
+    if indexed_paths and all(physical_split in str(path).casefold() for path in indexed_paths):
+        _scan_orphan_labels(labels_dir, expected_keys, report)
     return report
 
 

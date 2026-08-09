@@ -2,67 +2,82 @@
 
 ## 概述
 
-本模块基于 configs/class_hierarchy.yaml 的 15 类→6 大类映射，对正式实验预测结果进行
-层级错误分析，回答以下问题：
+本模块基于 `configs/class_hierarchy.yaml` 的 15 类→6 大类映射，将错误拆分为三个层级。核心原则：**漏检是定位/召回失败，不属于分类错误**。
 
-1. 错误主要发生在大类之间还是同一大类内部？
-2. 哪些大类混淆组合最严重？
-3. 各类错误（漏检、误检、类别混淆、定位误差、mask 质量）的比例如何？
+## 三层错误层级
+
+| 层级 | 类别 | 定义 | 分母 |
+|---|---|---|---|
+| L1 定位/召回 | localization_miss (FN) | GT 实例未被任何预测召回 | 总 GT 实例 |
+| L1 定位/召回 | localization_false_positive (FP) | 预测未匹配任何 GT | 总预测数 |
+| L2 分类（已匹配） | coarse_group_error | 已匹配 GT-pred 对中，6大类不同 | 已匹配对数 |
+| L2 分类（已匹配） | within_group_confusion | 已匹配 GT-pred 对中，同大类但不同细类 | 已匹配对数 |
+| L3 mask 质量 | mask_quality_error | 已匹配对中 mask IoU 低于阈值 | 已匹配对数 |
 
 ## 层级映射
 
-| 大类 key           | 包含细类 ID            | 描述     |
-|--------------------|------------------------|----------|
-| surface_corrosion  | 0, 1, 2, 3             | 表面腐蚀 |
-| surface_crack      | 4, 5                    | 表面裂纹 |
-| surface_defect     | 6, 7, 8, 9              | 表面缺陷 |
-| repair_trace       | 10                      | 维修痕迹 |
-| blade_damage       | 11, 12, 13              | 叶片损伤 |
-| attachment_loss    | 14                      | 附件脱落 |
+| 大类 key | 包含细类 ID | 描述 |
+|---|---|---|
+| surface_corrosion | 0, 1, 2, 3 | 表面腐蚀 |
+| surface_crack | 4, 5 | 表面裂纹 |
+| surface_defect | 6, 7, 8, 9 | 表面缺陷 |
+| repair_trace | 10 | 维修痕迹 |
+| blade_damage | 11, 12, 13 | 叶片损伤 |
+| attachment_loss | 14 | 附件脱落 |
 
-## 聚合方法
+## 正式结果 (full_primary_yolo11s_seg_960, blade-v2)
 
-将 15 类模型的 val 预测结果和真实标签按映射表聚合为 6 大类，以此计算：
+### L1 定位失败
 
-- **6×6 混淆矩阵**：展示大类间的混淆模式
-- **逐大类 Precision / Recall / F1**：评估每个大类的可识别性
-- **错误分类统计**：
-  - coarse_group_error：预测大类与真实大类不同
-  - within_group_confusion：预测与真实属于同一大类，但细类不同
-  - localization_error：IOU 低于阈值的匹配
-  - mask_quality_error：mask 边界质量低于标准的匹配
+- **漏检 (FN)**: 3,382 / 4,943 = **68.4%** of GT instances
+- **误检 (FP)**: 463 / 2,033 = **22.8%** of predictions
+- **正确召回**: 1,491 / 4,943 = 30.2%
 
-## 重点分析
+### L2 分类错误（仅计算已匹配的 1,491 对）
 
-- 类别 0–3（表面腐蚀）内部混淆
-- 类别 4–5（表面裂纹）内部混淆
-- 类别 6–9（表面缺陷）内部混淆
-- 类别 11–13（叶片损伤）内部混淆
-- 大类间高频混淆组合（如腐蚀 vs 裂纹）
+- **跨大类错误 (coarse_group_error)**: 129 / 1,491 = **8.7%**
+- **同组细类混淆 (within_group_confusion)**: 750 对（同一大类内部细类混淆，来自 per-fine-class-pair 计数，非 per-instance）
+
+### L3 mask 质量
+
+- 阈值待团队确定。建议 mask IoU < 0.5 作为质量问题标志。
+
+### 关键结论
+
+1. **错误主要发生在跨大类之间还是同一大类内部？**
+   - 错误主要在 L1（漏检/召回失败），FN 率 68.4%。一旦成功检测（1,491 对），大类分类准确率 91.3%（仅 8.7% 跨大类错误）。
+   - 同组细类混淆 750 对与跨大类错误 129 来自不同计数粒度，不能直接比较。
+
+2. **哪些大类混淆组合最严重？**
+   - 腐蚀→缺陷 (22 实例) 和 缺陷→裂纹 (61 实例) 是主要跨大类混淆
+   - 腐蚀组内 (0-3) 和缺陷组内 (6-9) 是同组细类混淆的主要来源
+
+3. **困难类别**
+   - 类别13（结构损伤，27 GT）AP50=0.102
+   - 类别8（胶衣脱落）AP50=0.128
+   - 类别14（接闪器脱落）AP50=0.292
 
 ## 输出文件
 
-路径：esults/hierarchy/
+路径：`results/analysis/`
 
-| 文件                                  | 说明                           |
-|---------------------------------------|--------------------------------|
-| coarse_confusion_matrix.png           | 6 类混淆矩阵热力图             |
-| coarse_class_metrics.csv              | 逐大类 Precision/Recall/F1    |
-| within_group_confusion.csv            | 同组内部细类混淆记录           |
-| hierarchical_metrics.csv              | 层级指标汇总                   |
-| hierarchical_error_distribution.png   | 四类错误比例饼图               |
+| 文件 | 说明 |
+|---|---|
+| `coarse_confusion_matrix.png` | 6x6 混淆矩阵 |
+| `coarse_class_metrics.csv` | 逐大类 Precision/Recall/F1 |
+| `within_group_confusion.csv` | 同组细类混淆 |
+| `hierarchical_error_distribution.png` | 四类错误分布 |
 
-## 使用方法
+路径：`results/error_contract/`
 
-`powershell
-# 运行完整分析（读取 runs/ 下的预测结果）
-python -c ^
-  \"from blade_defect.experiment.analysis import analyze_hierarchy; ^
-   analyze_hierarchy('results/summary.csv', 'runs', 'results/hierarchy')\"
-`
+| 文件 | 说明 |
+|---|---|
+| `error_metric_contract.md` | 错误统计合同（三层定义、分母） |
+| `denominator_audit.csv` | 分母审计 |
+| `duplicate_count_audit.csv` | 129 vs 750 计数口径说明 |
 
-## 待验证假设
+## 注意事项
 
-1. 表面腐蚀（0–3）和表面缺陷（6–9）可能由于视觉特征相似而导致跨大类混淆。
-2. 维修痕迹（10）样本量小，可能被误分类到背景或其他大类。
-3. 附件脱落（14）属于罕见类别，漏检率可能显著高于其他大类。
+- 15类预测聚合为6类属于**诊断分析**，独立6类重训练属于**模型实验**，两者不互相替代
+- 旧全量模型（split_leakage_known=true）的指标不能与 v3 无泄漏正式结果直接混排
+- FN/FP 场景标签（过曝、阴影等）与模型错误类型分开保存

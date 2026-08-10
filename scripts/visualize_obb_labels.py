@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import csv
 import json
 import random
 from collections import Counter
@@ -10,8 +11,10 @@ from pathlib import Path
 
 import cv2
 import numpy as np
+import yaml
 
 from blade_defect.data import DEFECT_CLASSES
+from blade_defect.data.indexed_splits import load_indexed_splits
 
 
 IMAGE_SUFFIXES = {".bmp", ".jpeg", ".jpg", ".png", ".tif", ".tiff", ".webp"}
@@ -68,6 +71,72 @@ def _select_class_diverse(
             break
         selected.append(sample)
         covered.update(new_classes)
+    selected.extend(remaining[: max(0, count - len(selected))])
+    return selected[:count]
+
+
+def _acceptance_features(seg_label: Path, obb_label: Path) -> tuple[set[int], set[str]]:
+    classes = _read_classes(seg_label)
+    features: set[str] = set()
+    seg_lines = [line.split() for line in seg_label.read_text(encoding="utf-8-sig").splitlines() if line.split()]
+    obb_lines = [line.split() for line in obb_label.read_text(encoding="utf-8-sig").splitlines() if line.split()]
+    for seg_tokens, obb_tokens in zip(seg_lines, obb_lines):
+        if len(seg_tokens) < 7 or len(seg_tokens[1:]) % 2 or len(obb_tokens) != 9:
+            continue
+        try:
+            polygon = np.asarray([float(value) for value in seg_tokens[1:]], dtype=float).reshape(-1, 2)
+            box = np.asarray([float(value) for value in obb_tokens[1:]], dtype=float).reshape(4, 2)
+        except ValueError:
+            continue
+        sides = np.linalg.norm(np.roll(box, -1, axis=0) - box, axis=1)
+        positive_sides = sides[sides > 1e-12]
+        if positive_sides.size and positive_sides.max() / positive_sides.min() >= 4.0:
+            features.add("elongated")
+        edge = box[1] - box[0]
+        angle = abs(float(np.degrees(np.arctan2(edge[1], edge[0])))) % 90
+        if 10 <= angle <= 80:
+            features.add("tilted")
+        if np.any((box <= 0.02) | (box >= 0.98)):
+            features.add("edge_touching")
+        obb_area = abs(float(cv2.contourArea(box.astype(np.float32))))
+        polygon_area = abs(float(cv2.contourArea(polygon.astype(np.float32))))
+        if obb_area < 0.0025:
+            features.add("small_object")
+        if polygon_area >= 0.1 and obb_area > 0 and polygon_area / obb_area < 0.65:
+            features.add("large_irregular_mask")
+    return classes, features
+
+
+def _select_acceptance_diverse(
+    candidates: list[tuple[Path, Path, Path]], count: int, rng: random.Random,
+) -> list[tuple[Path, Path, Path]]:
+    remaining = list(candidates)
+    rng.shuffle(remaining)
+    metadata = {
+        (str(image), str(seg), str(obb)): _acceptance_features(seg, obb)
+        for image, seg, obb in remaining
+    }
+    wanted_features = {"elongated", "tilted", "edge_touching", "large_irregular_mask", "small_object"}
+    wanted_classes = {12, 13, 14}
+    selected: list[tuple[Path, Path, Path]] = []
+    covered_features: set[str] = set()
+    covered_classes: set[int] = set()
+    while remaining and len(selected) < count:
+        best_index = max(
+            range(len(remaining)),
+            key=lambda index: (
+                len(metadata[tuple(map(str, remaining[index]))][1] & (wanted_features - covered_features)) * 4
+                + len(metadata[tuple(map(str, remaining[index]))][0] & (wanted_classes - covered_classes)) * 5
+                + len(metadata[tuple(map(str, remaining[index]))][0] - covered_classes)
+            ),
+        )
+        sample = remaining.pop(best_index)
+        classes, features = metadata[tuple(map(str, sample))]
+        selected.append(sample)
+        covered_classes.update(classes)
+        covered_features.update(features)
+        if wanted_features <= covered_features and wanted_classes <= covered_classes:
+            break
     selected.extend(remaining[: max(0, count - len(selected))])
     return selected[:count]
 
@@ -153,6 +222,8 @@ def generate_previews(
     *,
     count: int = 100,
     seed: int = 42,
+    count_per_split: int | None = None,
+    acceptance: str | Path | None = None,
 ) -> dict[str, object]:
     """生成训练集和验证集数量近似均衡、类别尽量丰富的预览集。"""
     if count < 2:
@@ -162,27 +233,57 @@ def generate_previews(
     output_root = Path(output).resolve()
     output_root.mkdir(parents=True, exist_ok=True)
     rng = random.Random(seed)
-    split_targets = {"train": count // 2, "val": count - count // 2}
+    seg_config = yaml.safe_load((seg_root / "data.yaml").read_text(encoding="utf-8-sig"))
+    obb_config = yaml.safe_load((obb_root / "data.yaml").read_text(encoding="utf-8-sig"))
+    indexed_mode = all(
+        str(seg_config.get(split, "")).casefold().endswith(".txt")
+        and str(obb_config.get(split, "")).casefold().endswith(".txt")
+        for split in ("train", "val", "test")
+    )
+    splits = ("train", "val", "test") if indexed_mode else ("train", "val")
+    if count_per_split is not None:
+        if count_per_split < 1:
+            raise ValueError("count_per_split must be positive")
+        split_targets = {split: count_per_split for split in splits}
+    else:
+        base, remainder = divmod(count, len(splits))
+        split_targets = {split: base + (index < remainder) for index, split in enumerate(splits)}
     summary: dict[str, object] = {
         "source_seg": str(seg_root),
         "source_obb": str(obb_root),
-        "requested": count,
+        "requested": sum(split_targets.values()),
         "seed": seed,
+        "mode": "indexed" if indexed_mode else "directory",
         "splits": {},
     }
 
+    acceptance_rows: list[dict[str, object]] = []
+    if indexed_mode:
+        seg_indexed = load_indexed_splits(seg_root / "data.yaml", splits)
+        obb_indexed = load_indexed_splits(obb_root / "data.yaml", splits)
+
     for split, target in split_targets.items():
-        image_root = seg_root / "images" / split
-        seg_label_root = seg_root / "labels" / split
-        obb_label_root = obb_root / "labels" / split
-        candidates = []
-        for image_path in _images(image_root):
-            relative = image_path.relative_to(image_root)
-            seg_label = seg_label_root / relative.with_suffix(".txt")
-            obb_label = obb_label_root / relative.with_suffix(".txt")
-            if seg_label.is_file() and obb_label.is_file():
-                candidates.append((image_path, seg_label, obb_label))
-        selected = _select_class_diverse(candidates, min(target, len(candidates)), rng)
+        if indexed_mode:
+            obb_by_id = {sample.sample_id: sample for sample in obb_indexed[split]}
+            candidates = [
+                (sample.image_path, sample.label_path, obb_by_id[sample.sample_id].label_path)
+                for sample in seg_indexed[split]
+                if sample.sample_id in obb_by_id
+                and sample.image_path.is_file() and sample.label_path.is_file()
+                and obb_by_id[sample.sample_id].label_path.is_file()
+            ]
+        else:
+            image_root = seg_root / "images" / split
+            seg_label_root = seg_root / "labels" / split
+            obb_label_root = obb_root / "labels" / split
+            candidates = []
+            for image_path in _images(image_root):
+                relative = image_path.relative_to(image_root)
+                seg_label = seg_label_root / relative.with_suffix(".txt")
+                obb_label = obb_label_root / relative.with_suffix(".txt")
+                if seg_label.is_file() and obb_label.is_file():
+                    candidates.append((image_path, seg_label, obb_label))
+        selected = _select_acceptance_diverse(candidates, min(target, len(candidates)), rng)
         split_output = output_root / split
         split_output.mkdir(parents=True, exist_ok=True)
         class_counts: Counter[int] = Counter()
@@ -203,6 +304,20 @@ def generate_previews(
             if success:
                 encoded.tofile(output_path)
                 written += 1
+                classes, features = _acceptance_features(seg_label, obb_label)
+                acceptance_rows.append(
+                    {
+                        "split": split,
+                        "preview": output_path.relative_to(output_root.parent).as_posix(),
+                        "sample": image_path.name,
+                        "class_ids": " ".join(str(value) for value in sorted(classes)),
+                        "has_class_12": 12 in classes,
+                        "has_class_13": 13 in classes,
+                        "has_class_14": 14 in classes,
+                        "features": " ".join(sorted(features)),
+                        "conversion_only_no_prediction": True,
+                    }
+                )
         summary["splits"][split] = {
             "requested": target,
             "written": written,
@@ -212,6 +327,17 @@ def generate_previews(
         }
 
     summary["written"] = sum(item["written"] for item in summary["splits"].values())
+    acceptance_path = Path(acceptance).resolve() if acceptance else output_root.parent / "preview_acceptance.csv"
+    acceptance_path.parent.mkdir(parents=True, exist_ok=True)
+    fields = [
+        "split", "preview", "sample", "class_ids", "has_class_12", "has_class_13",
+        "has_class_14", "features", "conversion_only_no_prediction",
+    ]
+    with acceptance_path.open("w", encoding="utf-8-sig", newline="") as handle:
+        writer = csv.DictWriter(handle, fieldnames=fields, lineterminator="\n")
+        writer.writeheader()
+        writer.writerows(acceptance_rows)
+    summary["acceptance_csv"] = str(acceptance_path)
     (output_root / "preview_summary.json").write_text(
         json.dumps(summary, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
     )
@@ -224,10 +350,13 @@ def main() -> None:
     parser.add_argument("--source-obb", required=True, type=Path)
     parser.add_argument("--output", required=True, type=Path)
     parser.add_argument("--count", type=int, default=100)
+    parser.add_argument("--count-per-split", type=int)
     parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument("--acceptance", type=Path)
     args = parser.parse_args()
     summary = generate_previews(
-        args.source_seg, args.source_obb, args.output, count=args.count, seed=args.seed
+        args.source_seg, args.source_obb, args.output, count=args.count, seed=args.seed,
+        count_per_split=args.count_per_split, acceptance=args.acceptance,
     )
     print(json.dumps(summary, ensure_ascii=False, indent=2))
 

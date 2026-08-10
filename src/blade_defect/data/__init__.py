@@ -11,7 +11,7 @@ from .defect_classes import (
 )
 from .label_check import DatasetCheckReport, check_dataset, clamp01
 from .indexed_splits import IndexedSample, load_indexed_split, load_indexed_splits, membership_hash
-from .obb_check import OBBDatasetIssue, OBBDatasetReport, check_obb_dataset
+from .obb_check import OBBDatasetIssue, OBBDatasetReport, check_obb_dataset, check_obb_indexed_samples
 from .split import split_dataset
 from .validation import DatasetGateError, DatasetGateReport, SplitGateReport, validate_dataset_gate
 
@@ -36,6 +36,7 @@ __all__ = [
     "OBBDatasetIssue",
     "OBBDatasetReport",
     "check_obb_dataset",
+    "check_obb_indexed_samples",
     "split_dataset",
     "DatasetGateError",
     "DatasetGateReport",

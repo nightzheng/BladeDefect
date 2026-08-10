@@ -5,12 +5,14 @@ from __future__ import annotations
 from collections import Counter
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
+from typing import Iterable
 
 import cv2
 import numpy as np
 
 from blade_defect.utils.files import find_images, find_labels
 from blade_defect.utils.paths import resolve_path
+from .indexed_splits import IndexedSample
 
 
 @dataclass(frozen=True)
@@ -165,4 +167,67 @@ def check_obb_dataset(
     return report
 
 
-__all__ = ["OBBDatasetIssue", "OBBDatasetReport", "check_obb_dataset"]
+def check_obb_indexed_samples(
+    samples: Iterable[IndexedSample],
+    *,
+    num_classes: int = 15,
+    min_area: float = 1e-8,
+) -> OBBDatasetReport:
+    """Validate exactly the samples selected by one txt index split."""
+    if num_classes <= 0:
+        raise ValueError("num_classes must be positive")
+    if min_area <= 0:
+        raise ValueError("min_area must be positive")
+    selected = list(samples)
+    report = OBBDatasetReport(images=len(selected))
+    seen: set[str] = set()
+    for sample in selected:
+        identity = sample.sample_id
+        if identity in seen:
+            report.issues.append(
+                OBBDatasetIssue(identity, "duplicate_index_entry", "sample appears more than once in split index")
+            )
+            continue
+        seen.add(identity)
+        if not sample.image_path.is_file():
+            report.corrupt_images.append(identity)
+            report.issues.append(
+                OBBDatasetIssue(identity, "missing_image", "indexed image does not exist")
+            )
+            continue
+        if not _is_decodable(sample.image_path):
+            report.corrupt_images.append(identity)
+            report.issues.append(
+                OBBDatasetIssue(identity, "corrupt_image", "OpenCV could not decode image")
+            )
+        if not sample.label_path.is_file():
+            report.missing_labels.append(identity)
+            report.issues.append(
+                OBBDatasetIssue(identity, "missing_label", "indexed image has no matching label")
+            )
+            continue
+        report.labels += 1
+        text = sample.label_path.read_text(encoding="utf-8-sig")
+        nonempty_lines = [
+            (number, line.split())
+            for number, line in enumerate(text.splitlines(), 1)
+            if line.split()
+        ]
+        if not nonempty_lines:
+            report.negative_images += 1
+            continue
+        for line_number, tokens in nonempty_lines:
+            error = _line_error(tokens, num_classes, min_area)
+            if error is None:
+                report.valid_instances += 1
+            else:
+                error_type, message = error
+                report.issues.append(
+                    OBBDatasetIssue(identity, error_type, message, line_number)
+                )
+    return report
+
+
+__all__ = [
+    "OBBDatasetIssue", "OBBDatasetReport", "check_obb_dataset", "check_obb_indexed_samples"
+]

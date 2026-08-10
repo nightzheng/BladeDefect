@@ -1,5 +1,7 @@
 # OBB 工程交接指南
 
+> 文档定位：本文件是 OBB 主交接入口。早期盘点与阻塞分析保留用于追溯；当前可执行状态以文末“当前交接状态”为准。抽样激活的详细证据见 `obb_sample_activation_handoff.md`。
+
 本文描述当前代码实际支持的 OBB 执行链路，以及激活 `blade-v3-obb` 前必须补齐的接口。所有命令均从仓库根目录 `D:\Program\BladeDefect` 执行。
 
 ## 1. 目标链路
@@ -222,3 +224,24 @@ git diff -- scripts/convert_seg_to_obb.py `
 ```
 
 本次交接的预期是第二条 `git diff` 无输出；仅文档发生变化。
+
+## 当前交接状态
+
+截至 2026-08-10：
+
+- v3 索引型数据入口：已完成
+- v3 分层抽样转换：已完成
+- indexed validator：已通过
+- 120 张并排预览：已生成
+- 核心 OBB 算法：未修改
+- 官方 yolo11s-obb.pt：尚未取得可信缓存
+- 1 epoch smoke：BLOCKED
+- 50 epochs baseline：NOT STARTED
+
+后续执行者无需重新实现转换算法。
+
+下一步：
+1. 获取并核验官方 yolo11s-obb.pt；
+2. 执行 1 epoch smoke；
+3. smoke 验收通过后生成完整 v3 OBB 派生数据；
+4. 启动正式 50 epochs baseline。

@@ -221,6 +221,24 @@ def test_obb_runner_failure_marks_manifest_failed(tmp_path: Path, monkeypatch) -
     assert manifest["finished_at"]
 
 
+def test_materialize_absolute_data_yaml_creates_missing_parent(tmp_path: Path) -> None:
+    from scripts.run_v3_obb_baseline import _materialize_absolute_data_yaml
+
+    data_yaml = _build_obb_dataset(tmp_path)
+    output = tmp_path / "runs" / "obb" / "probe" / "normalized_data.yaml"
+    assert not output.parent.is_dir()
+
+    normalized = _materialize_absolute_data_yaml(data_yaml, output)
+
+    payload = yaml.safe_load(normalized.read_text(encoding="utf-8"))
+    assert "test" not in payload
+    for split in ("train", "val"):
+        list_path = Path(payload[split])
+        assert list_path.is_absolute() and list_path.is_file()
+        entries = list_path.read_text(encoding="utf-8").splitlines()
+        assert entries and all(Path(entry).is_absolute() for entry in entries)
+
+
 def test_calibrate_batch_rejects_invalid_fraction(tmp_path: Path) -> None:
     config_path = _write_baseline_config(tmp_path, tmp_path / "unused.yaml")
     for fraction in (0.0, -0.1, 1.5):

@@ -146,6 +146,7 @@ def _materialize_absolute_data_yaml(data_path: Path, output: Path) -> Path:
     dataset_root = resolve_path(payload.get("path", "."), data_path.parent)
     payload["path"] = posix_path(dataset_root)
     payload.pop("test", None)
+    output.parent.mkdir(parents=True, exist_ok=True)
     for split in ("train", "val"):
         entry = payload.get(split)
         if not isinstance(entry, str) or not entry.lower().endswith(".txt"):
@@ -163,7 +164,6 @@ def _materialize_absolute_data_yaml(data_path: Path, output: Path) -> Path:
         absolute_list = output.with_name(f"{output.stem}.{split}.txt")
         absolute_list.write_text("\n".join(lines) + "\n", encoding="utf-8", newline="\n")
         payload[split] = posix_path(absolute_list)
-    output.parent.mkdir(parents=True, exist_ok=True)
     with output.open("w", encoding="utf-8", newline="\n") as file:
         yaml.safe_dump(payload, file, allow_unicode=True, sort_keys=False)
     return output

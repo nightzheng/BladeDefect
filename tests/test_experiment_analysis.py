@@ -25,19 +25,12 @@ def test_analysis_generates_required_artifacts(tmp_path: Path) -> None:
 
     outputs = analyze_experiments(summary, tmp_path / "runs", tmp_path / "analysis")
 
+    # 6ad866c 起 analyzer 收窄为 5 个图表工件；深度分析迁移至 v3_analysis 工具链。
     assert {path.name for path in outputs} == {
-        "model_comparison.csv", "per_class_metrics.csv", "model_comparison.png",
-        "input_size_map.png", "input_size_fps.png", "pr_curve.png", "f1_curve.png",
-        "confusion_matrix.png",
+        "model_comparison.png", "accuracy_speed_tradeoff.png", "f1_curve.png",
+        "input_size_map.png", "input_size_fps.png",
     }
-    with (tmp_path / "analysis" / "model_comparison.csv").open(encoding="utf-8-sig") as handle:
-        comparison = next(csv.DictReader(handle))
-    assert comparison["imgsz"] == "640.0"
-    assert float(comparison["f1"]) > 0.66
-    with (tmp_path / "analysis" / "per_class_metrics.csv").open(encoding="utf-8-sig") as handle:
-        per_class = next(csv.DictReader(handle))
-    assert per_class["class"] == "crack"
-    assert (tmp_path / "analysis" / "confusion_matrix.png").read_bytes() == b"matrix"
+    assert all(path.stat().st_size > 0 for path in outputs)
 
 
 def test_publish_report_facing_analysis_assets(tmp_path: Path) -> None:

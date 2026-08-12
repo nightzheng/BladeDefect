@@ -1,0 +1,21 @@
+project_root: ../..
+name: v3_yolo11s_obb_960_e50
+task: obb
+model: yolo11s-obb.pt
+data: datasets/blade-v3-grouped-obb/data.yaml
+epochs: 50
+imgsz: 960
+batch: 8
+device: 0
+workers: 4
+seed: 42
+pretrained: true
+cache: false
+amp: true
+val: true
+save: true
+save_period: 5
+exist_ok: true
+project: runs
+label_level: fine
+notes: 正式 v3 OBB baseline（15 类，自动 OBB 来自 polygon 最小外接矩形，非人工旋转框真值）。训练/验证/best epoch/阈值选择只使用 train/val，test 锁定。batch 依据真实显存探针校准（results/obb_v3/batch_calibration.json）。

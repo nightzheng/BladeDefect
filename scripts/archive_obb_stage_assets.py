@@ -24,8 +24,12 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from blade_defect.data import load_indexed_splits, membership_hash
-from blade_defect.experiment.metadata import sha256_file
+from blade_defect.data import identity_hash, load_indexed_splits, membership_hash
+from blade_defect.experiment.metadata import (
+    load_json,
+    missing_environment_fields,
+    sha256_file,
+)
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
@@ -46,9 +50,51 @@ GROUP_DESCRIPTIONS = {
     "official_weight": "官方 yolo11s-obb.pt 预训练权重（来源与 SHA-256 已核验）",
 }
 
+IMAGE_SUFFIXES = {".jpg", ".jpeg", ".png", ".bmp"}
+
+
+def verify_hardlinks(indexed: dict[str, list[Any]]) -> dict[str, int]:
+    """核验全部索引图片为硬链接；缺失/不可读计入 stat_failed（不静默跳过）。"""
+    total_indexed = sum(len(samples) for samples in indexed.values())
+    stat_ok = 0
+    linked = 0
+    stat_failed = 0
+    for samples in indexed.values():
+        for sample in samples:
+            try:
+                stat = os.stat(sample.image_path)
+            except OSError:
+                stat_failed += 1
+                continue
+            stat_ok += 1
+            if stat.st_nlink > 1:
+                linked += 1
+    return {
+        "total_indexed": total_indexed,
+        "stat_ok": stat_ok,
+        "stat_failed": stat_failed,
+        "linked": linked,
+    }
+
+
+def audit_preview_files(preview_dir: Path, expected_names: list[str]) -> dict[str, Any]:
+    """核对预览目录与审核 CSV：仅统计已知图片后缀，并做文件名双向比对。"""
+    on_disk = {
+        path.name
+        for path in preview_dir.rglob("*")
+        if path.is_file() and path.suffix.lower() in IMAGE_SUFFIXES
+    }
+    expected = set(expected_names)
+    return {
+        "on_disk": len(on_disk),
+        "expected": len(expected),
+        "missing": sorted(expected - on_disk),
+        "unexpected": sorted(on_disk - expected),
+    }
+
 
 def _load_json(path: Path) -> dict[str, Any]:
-    return json.loads(path.read_text(encoding="utf-8-sig"))
+    return load_json(path)
 
 
 def _iter_group_files(group: str, root: Path, files: list[Path] | None = None) -> list[dict[str, Any]]:
@@ -61,7 +107,6 @@ def _iter_group_files(group: str, root: Path, files: list[Path] | None = None) -
                 "relative_path": path.relative_to(root).as_posix() if path.is_relative_to(root) else path.name,
                 "size_bytes": path.stat().st_size,
                 "sha256": sha256_file(path),
-                "_abs": str(path),
             }
         )
     return rows
@@ -95,6 +140,7 @@ def validate_stage(
     obb_results_dir: Path,
     dataset_root: Path,
     weight_path: Path,
+    weight_sha256: str | None = None,
 ) -> list[dict[str, Any]]:
     """按验收口径逐项校验，返回结构化检查项（全部通过则交付有效）。"""
     checks: list[dict[str, Any]] = []
@@ -138,11 +184,7 @@ def validate_stage(
         f"dataset_id={metrics.get('dataset_id')}，parent={metrics.get('parent_dataset_id')}，"
         f"experiment={metrics.get('name')}",
     )
-    env_missing = [
-        field
-        for field in ("python.version", "packages.torch", "packages.ultralytics", "cuda.available", "gpus")
-        if _nested(environment, field) is None
-    ]
+    env_missing = missing_environment_fields(environment)
     _check(
         checks,
         "environment_fields_present",
@@ -172,7 +214,7 @@ def validate_stage(
         f"parent={str(dataset_manifest.get('parent_membership_sha256'))[:16]}…",
     )
     identity = {
-        split: _identity_hash([sample.sample_id for sample in indexed[split]])
+        split: identity_hash(sample.sample_id for sample in indexed[split])
         for split in indexed
     }
     parent_identity = dataset_manifest.get("parent_split_identity_sha256", {})
@@ -188,22 +230,15 @@ def validate_stage(
         json.dumps(equals, ensure_ascii=False),
     )
 
-    hardlink_total = 0
-    hardlink_linked = 0
-    for samples in indexed.values():
-        for sample in samples:
-            try:
-                stat = os.stat(sample.image_path)
-            except OSError:
-                continue
-            hardlink_total += 1
-            if stat.st_nlink > 1:
-                hardlink_linked += 1
+    hardlink_stats = verify_hardlinks(indexed)
     _check(
         checks,
         "images_are_hardlinks",
-        hardlink_total > 0 and hardlink_linked == hardlink_total,
-        f"硬链接图片 {hardlink_linked}/{hardlink_total}（0 复制）",
+        hardlink_stats["stat_failed"] == 0
+        and hardlink_stats["stat_ok"] == hardlink_stats["total_indexed"] > 0
+        and hardlink_stats["linked"] == hardlink_stats["stat_ok"],
+        f"硬链接图片 {hardlink_stats['linked']}/{hardlink_stats['stat_ok']}（0 复制），"
+        f"索引总数 {hardlink_stats['total_indexed']}，stat 失败 {hardlink_stats['stat_failed']}",
     )
     _check(
         checks,
@@ -217,7 +252,7 @@ def validate_stage(
 
     provenance_path = obb_results_dir / "weight_provenance.json"
     provenance = _load_json(provenance_path)
-    actual_weight_sha = sha256_file(weight_path) if weight_path.is_file() else None
+    actual_weight_sha = weight_sha256 or (sha256_file(weight_path) if weight_path.is_file() else None)
     _check(
         checks,
         "official_weight_provenance_verified",
@@ -254,19 +289,23 @@ def validate_stage(
     covered_classes = set()
     for row in preview_rows:
         covered_classes.update(int(value) for value in row["class_ids"].split())
-    preview_images = [
-        p for p in (obb_results_dir / "conversion_preview").rglob("*") if p.is_file() and p.suffix.lower() != ".json"
-    ]
+    preview_audit = audit_preview_files(
+        obb_results_dir / "conversion_preview",
+        [Path(row["preview"]).name for row in preview_rows],
+    )
     _check(
         checks,
         "preview_audit_90_covers_15_classes",
         len(preview_rows) == 90
         and per_split == {"train": 30, "val": 30, "test": 30}
         and covered_classes == set(range(15))
-        and len(preview_images) == 90
+        and preview_audit["on_disk"] == 90
+        and not preview_audit["missing"]
+        and not preview_audit["unexpected"]
         and all(row["conversion_only_no_prediction"] == "True" for row in preview_rows),
         f"审核 {len(preview_rows)} 条（{per_split}），类别覆盖 {len(covered_classes)}，"
-        f"预览图 {len(preview_images)} 张，均为仅转换预览",
+        f"预览图双向比对 on_disk={preview_audit['on_disk']}、missing={len(preview_audit['missing'])}、"
+        f"unexpected={len(preview_audit['unexpected'])}，均为仅转换预览",
     )
 
     comparison = _load_json(obb_results_dir / "obb_seg_comparison.json")
@@ -290,24 +329,6 @@ def validate_stage(
         f"prior valid={prior_report.get('valid')}，membership 与现场重算一致",
     )
     return checks
-
-
-def _nested(payload: dict[str, Any], dotted: str) -> Any:
-    current: Any = payload
-    for part in dotted.split("."):
-        if not isinstance(current, dict) or part not in current:
-            return None
-        current = current[part]
-    return current
-
-
-def _identity_hash(sample_ids: list[str]) -> str:
-    import hashlib
-
-    digest = hashlib.sha256()
-    for sample_id in sorted(sample_ids):
-        digest.update(f"{sample_id}\n".encode("utf-8"))
-    return digest.hexdigest()
 
 
 def write_stage_metrics(
@@ -443,7 +464,16 @@ def build_stage_handoff(
         }
         for group, rows in sorted(groups.items())
     ]
-    checks = validate_stage(run_dir, obb_results_dir, dataset_root, weight_path)
+    checks = validate_stage(
+        run_dir,
+        obb_results_dir,
+        dataset_root,
+        weight_path,
+        weight_sha256=next(
+            (row["sha256"] for row in artifact_rows if row["group"] == "official_weight"),
+            None,
+        ),
+    )
     validation: dict[str, Any] = {
         "generated_at": datetime.now().astimezone().isoformat(timespec="seconds"),
         "run_dir": str(run_dir),

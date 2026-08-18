@@ -10,7 +10,14 @@ from .defect_classes import (
     get_group_name,
 )
 from .label_check import DatasetCheckReport, check_dataset, clamp01
-from .indexed_splits import IndexedSample, load_indexed_split, load_indexed_splits, membership_hash
+from .indexed_splits import (
+    IndexedSample,
+    build_split_consistency,
+    identity_hash,
+    load_indexed_split,
+    load_indexed_splits,
+    membership_hash,
+)
 from .obb_check import (
     OBBDatasetIssue,
     OBBDatasetReport,
@@ -37,6 +44,8 @@ __all__ = [
     "check_dataset",
     "clamp01",
     "IndexedSample",
+    "build_split_consistency",
+    "identity_hash",
     "load_indexed_split",
     "load_indexed_splits",
     "membership_hash",

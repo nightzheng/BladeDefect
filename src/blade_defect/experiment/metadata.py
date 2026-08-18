@@ -308,12 +308,48 @@ def create_run_manifest(
     }
 
 
+ENVIRONMENT_REQUIRED_FIELDS = (
+    "python.version",
+    "packages.torch",
+    "packages.ultralytics",
+    "cuda.available",
+    "gpus",
+)
+
+
+def load_json(path: str | Path) -> dict[str, Any]:
+    """读取 UTF-8（容忍 BOM）JSON 文件，供各归档/校验脚本共用。"""
+    return json.loads(resolve_path(path).read_text(encoding="utf-8-sig"))
+
+
+def nested_get(payload: Mapping[str, Any], dotted: str) -> Any:
+    """按点分路径读取嵌套字典，缺失时返回 None。"""
+    current: Any = payload
+    for part in dotted.split("."):
+        if not isinstance(current, Mapping) or part not in current:
+            return None
+        current = current[part]
+    return current
+
+
+def missing_environment_fields(
+    environment: Mapping[str, Any],
+    required: tuple[str, ...] = ENVIRONMENT_REQUIRED_FIELDS,
+) -> list[str]:
+    """返回 environment.json 中缺失的必备字段列表（空列表表示齐备）。"""
+    return [field for field in required if nested_get(environment, field) is None]
+
+
 __all__ = [
+    "ENVIRONMENT_REQUIRED_FIELDS",
     "atomic_write_json",
     "collect_dataset_metadata",
     "collect_environment_metadata",
     "collect_git_metadata",
     "create_run_manifest",
+    "load_json",
+    "missing_environment_fields",
+    "nested_get",
     "sha256_file",
     "utc_timestamp",
 ]

@@ -1,9 +1,10 @@
 import json
 from pathlib import Path
 
-import pytest
 from PIL import Image
 
+import scripts.cache_dataset_validation as cache_gate
+from blade_defect.data import identity_hash
 from scripts.cache_dataset_validation import (
     CACHE_SCHEMA_VERSION,
     build_file_state,
@@ -34,11 +35,10 @@ def _build_dataset(root: Path, per_split: int = 4) -> Path:
         encoding="utf-8",
     )
     from blade_defect.data import load_indexed_splits, membership_hash
-    from scripts.cache_dataset_validation import _identity_hash
 
     indexed = load_indexed_splits(dataset / "data.yaml", ("train", "val", "test"))
     identity = {
-        split: _identity_hash([sample.sample_id for sample in indexed[split]])
+        split: identity_hash(sample.sample_id for sample in indexed[split])
         for split in indexed
     }
     (dataset / "dataset_manifest.json").write_text(
@@ -176,11 +176,55 @@ def test_sampled_decode_for_ci_smoke_does_not_touch_formal_cache(tmp_path: Path)
     payload = run_cached_validation(dataset, cache_path=cache, decode_sample=3, decode_seed=42)
     assert payload["cache"]["decision"] == "sampled"
     assert payload["cache"]["decoded_images"] == 3
+    assert payload["cache"]["decode_unchecked_images"] == 9
     assert payload["cache"]["cache_written"] is False
     assert payload["cache"]["sampled_decode"]["seed"] == 42
     assert not cache.exists()
     repeat = run_cached_validation(dataset, cache_path=cache, decode_sample=3, decode_seed=42)
     assert repeat["cache"]["decoded_images"] == 3
+
+
+def test_sampled_mode_decodes_exactly_the_sample(tmp_path: Path, monkeypatch) -> None:
+    dataset = _build_dataset(tmp_path)
+    calls = []
+    real_decode = cache_gate.is_image_decodable
+
+    def counting_decode(path):
+        calls.append(path)
+        return real_decode(path)
+
+    monkeypatch.setattr(cache_gate, "is_image_decodable", counting_decode)
+    payload = run_cached_validation(
+        dataset, cache_path=tmp_path / "cache.json", decode_sample=5, decode_seed=42
+    )
+    assert payload["cache"]["decision"] == "sampled"
+    assert len(calls) == 5
+    assert payload["cache"]["decoded_images"] == 5
+    assert payload["cache"]["decode_unchecked_images"] == 7
+    assert payload["valid"] is True
+
+
+def test_no_cache_forces_cold_and_still_writes_cache(tmp_path: Path) -> None:
+    dataset = _build_dataset(tmp_path)
+    cache = tmp_path / "cache.json"
+    run_cached_validation(dataset, cache_path=cache)
+    before = cache.read_bytes()
+    payload = run_cached_validation(dataset, cache_path=cache, use_cache=False)
+    assert payload["cache"]["decision"] == "cold"
+    assert payload["cache"]["decoded_images"] == 12
+    assert payload["cache"]["cache_written"] is True
+    assert cache.read_bytes() != before or json.loads(cache.read_text())["last_decision"] == "cold"
+
+
+def test_pure_hit_does_not_rewrite_cache(tmp_path: Path) -> None:
+    dataset = _build_dataset(tmp_path)
+    cache = tmp_path / "cache.json"
+    run_cached_validation(dataset, cache_path=cache)
+    before = cache.read_bytes()
+    payload = run_cached_validation(dataset, cache_path=cache)
+    assert payload["cache"]["decision"] == "hit"
+    assert payload["cache"]["cache_written"] is False
+    assert cache.read_bytes() == before
 
 
 def test_build_file_state_and_decide_cache_units(tmp_path: Path) -> None:

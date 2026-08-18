@@ -33,8 +33,14 @@ smoke、batch 校准、50/100 轮 baseline 每次启动都会重复触发，属�
    索引重复项、跨 split 重叠与 split/membership 一致性。命中运行中标签若被破坏
    仍会被判 invalid（测试 `test_label_format_is_fully_rechecked_on_cache_hit`）。
 5. **CI/smoke 抽样**：`--decode-sample N --decode-seed 42` 使用固定种子对索引成员
-   抽样解码；抽样模式不读取也不写入正式缓存，报告中以 `decision=sampled` 单独标记，
+   抽样解码；**只对抽样样本做解码判定，非抽样样本计为 `decode_unchecked` 且绝不
+   兜底全量解码**（测试 `test_sampled_mode_decodes_exactly_the_sample`）。抽样模式
+   不读取也不写入正式缓存，报告中以 `decision=sampled` 单独标记，
    不得作为正式数据完整性结论。
+6. **缓存写回**：冷启动 / 复检 / `--no-cache` 强制全量后原子写入缓存
+   （临时文件 + `os.replace`）；纯命中且无缺键补齐时不重写缓存
+   （测试 `test_pure_hit_does_not_rewrite_cache`、
+   `test_no_cache_forces_cold_and_still_writes_cache`）。
 
 ## 使用方式
 
@@ -65,14 +71,24 @@ python scripts/cache_dataset_validation.py --dataset datasets/blade-v3-grouped-o
 - 校验逻辑变更时必须递增 `CACHE_SCHEMA_VERSION`，使历史缓存自动失效（测试
   `test_validation_version_change_invalidates_cache`）。
 
+## 已知残留缺口（明示）
+
+- 文件身份为 `(size, mtime_ns)` 元信息而非内容哈希：等大小改写并还原 mtime 的文件
+  在理论上可逃逸复检。对 48,291 张 / 约 180GB 图片做内容哈希的成本接近全量解码本身，
+  故本轮按任务规定采用元信息键。缓解措施：标签始终全量校验（标签逃逸不可能）；
+  重大数据操作后或定期执行 `--no-cache` 强制冷启动；缓存文件 `validation_cache.json`
+  与数据同机同权限存放，篡改缓存者可等价地直接篡改数据，不引入新的信任边界。
+
 ## 实测耗时（blade-v3-grouped-obb，48,291 张，RTX 4060 Laptop 机型，2026-08-18 真实运行）
 
 | 场景 | 决策 | 解码张数 | 总耗时 | 报告 |
 |---|---|---|---|---|
 | 冷启动（首次构建） | cold | 48,291 | 3,342.3s（解码 3,303.0s + 文件元信息 19.0s + 标签全量 18.4s + 索引 1.7s） | `results/data_gate_cache/cold_run_report.json` |
-| 缓存命中 | hit | 0（复用 48,291 条） | 34.9s（标签仍全量 13.6s + 元信息 19.2s；解码 0.01s） | `results/data_gate_cache/cache_hit_report.json` |
+| 缓存命中（纯命中不重写缓存） | hit | 0（复用 48,291 条） | 35.7s（标签仍全量 16.2s + 元信息 17.4s + 索引 1.8s；解码 0.0s） | `results/data_gate_cache/cache_hit_report.json` |
+| CI/smoke 抽样（seed=42） | sampled | 512（其余 47,779 张 decode_unchecked） | 65.3s | `results/data_gate_cache/sampled_smoke_report.json` |
 | 失效与复检场景 | cold/partial | 见报告 | — | `results/data_gate_cache/cache_invalidation_report.json` |
 
 命中运行与 `results/obb_v3/validation_report.json` 基线逐字段一致（三 split 图片/标签/
 实例数、负样本数、membership、valid 全部相同），证明缓存复用不改变校验结论。
-相比冷启动 3,342s，命中运行 34.9s，单次启动等待降低约 98.96%。
+相比冷启动 3,342s，命中运行 35.7s，单次启动等待降低约 98.93%；CI/smoke 抽样通道
+65.3s 即可完成标签全量 + 512 张抽样解码。

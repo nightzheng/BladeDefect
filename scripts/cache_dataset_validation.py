@@ -9,8 +9,9 @@
    复用已通过的解码结果（缓存命中），不再逐张解码；
 3. 仅个别文件被修改时，只对变化样本触发解码复检，其余样本复用缓存；
 4. 无论命中与否，标签格式与路径存在性每次都全量检查（不进入缓存）；
-5. CI / smoke 可使用固定种子的抽样解码（--decode-sample + --decode-seed），
-   抽样模式不读也不写正式缓存，报告中单独标记。
+5. CI / smoke 可使用固定种子的抽样解码（--decode-sample + --decode-seed）；
+   抽样模式只对抽样样本做解码判定，非抽样样本计为 decode_unchecked 且绝不
+   兜底全量解码；抽样模式不读也不写正式缓存，报告中单独标记。
 
 缓存键（三者缺一不可，禁止只用旧时间戳或目录名判断数据未变化）：
 - 成员指纹：membership_sha256 + 各 split identity_sha256（来自索引 txt）；
@@ -39,11 +40,14 @@ import yaml
 from blade_defect.data import (
     DEFECT_CLASSES,
     IndexedSample,
+    build_split_consistency,
     check_obb_label_text,
+    identity_hash,
     is_image_decodable,
     load_indexed_splits,
     membership_hash,
 )
+from blade_defect.experiment.metadata import atomic_write_json
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_CACHE = PROJECT_ROOT / "results" / "data_gate_cache" / "validation_cache.json"
@@ -55,13 +59,6 @@ SPLITS = ("train", "val", "test")
 
 def _now() -> str:
     return datetime.now().astimezone().isoformat(timespec="seconds")
-
-
-def _identity_hash(sample_ids: list[str]) -> str:
-    digest = hashlib.sha256()
-    for sample_id in sorted(sample_ids):
-        digest.update(f"{sample_id}\n".encode("utf-8"))
-    return digest.hexdigest()
 
 
 def _git_commit() -> str:
@@ -159,12 +156,15 @@ def _decode_outcomes(
     indexed: dict[str, list[IndexedSample]],
 ) -> dict[str, bool]:
     outcomes: dict[str, bool] = {}
+    key_list = list(keys)
+    if not key_list:
+        return outcomes
     index = {
         f"{split}\t{sample.sample_id}": sample
         for split, samples in indexed.items()
         for sample in samples
     }
-    for key in keys:
+    for key in key_list:
         sample = index[key]
         outcomes[key] = is_image_decodable(sample.image_path)
     return outcomes
@@ -196,7 +196,7 @@ def run_cached_validation(
 
     membership = membership_hash(indexed)
     identity_hashes = {
-        split: _identity_hash([sample.sample_id for sample in indexed[split]])
+        split: identity_hash(sample.sample_id for sample in indexed[split])
         for split in indexed
     }
 
@@ -247,6 +247,8 @@ def run_cached_validation(
     decode_results = {**cached_outcomes, **fresh_outcomes}
 
     label_started = time.perf_counter()
+    backfilled = 0
+    decode_unchecked = 0
     split_reports: dict[str, dict[str, Any]] = {}
     for split in splits:
         samples = indexed[split]
@@ -292,15 +294,20 @@ def run_cached_validation(
                 continue
             decodable = decode_results.get(key)
             if decodable is None:
-                # 缓存缺少该键（例如旧缓存被截断）：立即解码补齐，不静默放过。
-                decodable = is_image_decodable(sample.image_path)
-                decode_results[key] = decodable
-                if decision == "hit":
-                    decision = "partial"
-                    reasons.append("cache_entry_missing")
-                if key not in recheck_keys:
-                    recheck_keys.append(key)
-            if not decodable:
+                if sampled:
+                    # CI/smoke 抽样模式：非抽样样本不做解码判定，绝不兜底全量解码。
+                    decode_unchecked += 1
+                else:
+                    # 缓存缺少该键（例如旧缓存被截断）：立即解码补齐，不静默放过。
+                    decodable = is_image_decodable(sample.image_path)
+                    decode_results[key] = decodable
+                    backfilled += 1
+                    if decision == "hit":
+                        decision = "partial"
+                        reasons.append("cache_entry_missing")
+                    if key not in recheck_keys:
+                        recheck_keys.append(key)
+            if decodable is False:
                 report["corrupt_images"].append(identity)
                 report["issues"].append(
                     {
@@ -347,41 +354,7 @@ def run_cached_validation(
         split_reports[split] = report
     label_seconds = time.perf_counter() - label_started
 
-    sets = {split: {sample.sample_id for sample in indexed[split]} for split in splits}
-    overlaps = {
-        f"{left}_{right}": sorted(sets[left] & sets[right])
-        for index, left in enumerate(splits)
-        for right in splits[index + 1 :]
-    }
-    manifest_path = dataset / "dataset_manifest.json"
-    manifest = (
-        json.loads(manifest_path.read_text(encoding="utf-8-sig"))
-        if manifest_path.is_file()
-        else {}
-    )
-    parent_hashes = manifest.get("parent_split_identity_sha256", {})
-    derived_hashes = manifest.get("derived_split_identity_sha256", {})
-    consistency: dict[str, Any] = {
-        "split_identity_sha256": identity_hashes,
-        "parent_split_identity_sha256": parent_hashes,
-        "derived_manifest_identity_sha256": derived_hashes,
-        "parent_equals_derived": {
-            split: bool(parent_hashes.get(split)) and parent_hashes.get(split) == identity_hashes[split]
-            for split in splits
-        },
-        "cross_split_overlap_counts": {key: len(value) for key, value in overlaps.items()},
-        "membership_sha256": membership,
-        "manifest_membership_sha256": manifest.get("derived_membership_sha256"),
-        "test_data_integrity_only": not bool(
-            manifest.get("test_policy", {}).get("allowed_for_training", True)
-        ),
-    }
-    consistency["valid"] = (
-        all(consistency["parent_equals_derived"].values())
-        and not any(consistency["cross_split_overlap_counts"].values())
-        and consistency["membership_sha256"] == consistency["manifest_membership_sha256"]
-        and consistency["test_data_integrity_only"]
-    )
+    consistency = build_split_consistency(indexed, dataset, splits)
 
     total_seconds = time.perf_counter() - started
     cache_block = {
@@ -403,9 +376,11 @@ def run_cached_validation(
         },
     }
     if sampled:
+        cache_block["decode_unchecked_images"] = decode_unchecked
         cache_block["sampled_decode"] = {
             "count": len(fresh_outcomes),
             "seed": decode_seed,
+            "unchecked": decode_unchecked,
             "scope": "ci_smoke_only_not_written_to_formal_cache",
         }
 
@@ -421,7 +396,8 @@ def run_cached_validation(
         "cache": cache_block,
     }
 
-    if not sampled and use_cache:
+    if not sampled and (decision != "hit" or backfilled):
+        # 纯命中且无缺键补齐时缓存内容未变化，跳过重写；--no-cache 强制全量后仍写缓存。
         new_cache = {
             "cache_schema_version": CACHE_SCHEMA_VERSION,
             "validator": VALIDATOR_ID,
@@ -442,9 +418,7 @@ def run_cached_validation(
             "code_commit": payload["code_commit"],
         }
         cache_file.parent.mkdir(parents=True, exist_ok=True)
-        cache_file.write_text(
-            json.dumps(new_cache, ensure_ascii=False) + "\n", encoding="utf-8"
-        )
+        atomic_write_json(cache_file, new_cache)
         cache_block["cache_written"] = True
     else:
         cache_block["cache_written"] = False
@@ -486,6 +460,7 @@ def write_run_report(payload: dict[str, Any], report_path: Path) -> None:
     }
     if "sampled_decode" in cache:
         report["sampled_decode"] = cache["sampled_decode"]
+        report["decode_unchecked_images"] = cache.get("decode_unchecked_images", 0)
     report_path.parent.mkdir(parents=True, exist_ok=True)
     report_path.write_text(
         json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"

@@ -22,7 +22,11 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from blade_defect.experiment.metadata import sha256_file
+from blade_defect.experiment.metadata import (
+    load_json,
+    missing_environment_fields,
+    sha256_file,
+)
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
@@ -32,14 +36,6 @@ FIVE_PIECE_SET = (
     "validation_predictions.json",
     "environment.json",
     "run_manifest.json",
-)
-
-ENVIRONMENT_REQUIRED_FIELDS = (
-    "python.version",
-    "packages.torch",
-    "packages.ultralytics",
-    "cuda.available",
-    "gpus",
 )
 
 # 两项正式实验的期望身份；dataset_id/label_level 不得漂移。
@@ -72,16 +68,7 @@ ARTIFACT_FIELDS = ("experiment_id", "relative_path", "size_bytes", "sha256")
 
 
 def _load_json(path: Path) -> dict[str, Any]:
-    return json.loads(path.read_text(encoding="utf-8-sig"))
-
-
-def _nested(payload: dict[str, Any], dotted: str) -> Any:
-    current: Any = payload
-    for part in dotted.split("."):
-        if not isinstance(current, dict) or part not in current:
-            return None
-        current = current[part]
-    return current
+    return load_json(path)
 
 
 def iter_artifact_rows(run_dir: Path, experiment_id: str) -> list[dict[str, Any]]:
@@ -170,9 +157,7 @@ def validate_experiment(
         and metrics.get("code_commit") == manifest.get("code_commit"),
         f"metrics={metrics.get('code_commit')}，manifest={manifest.get('code_commit')}",
     )
-    missing_env = [
-        field for field in ENVIRONMENT_REQUIRED_FIELDS if _nested(environment, field) is None
-    ]
+    missing_env = missing_environment_fields(environment)
     check(
         "environment_fields_present",
         not missing_env,

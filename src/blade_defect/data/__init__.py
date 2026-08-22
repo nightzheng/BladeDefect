@@ -10,8 +10,22 @@ from .defect_classes import (
     get_group_name,
 )
 from .label_check import DatasetCheckReport, check_dataset, clamp01
-from .indexed_splits import IndexedSample, load_indexed_split, load_indexed_splits, membership_hash
-from .obb_check import OBBDatasetIssue, OBBDatasetReport, check_obb_dataset, check_obb_indexed_samples
+from .indexed_splits import (
+    IndexedSample,
+    build_split_consistency,
+    identity_hash,
+    load_indexed_split,
+    load_indexed_splits,
+    membership_hash,
+)
+from .obb_check import (
+    OBBDatasetIssue,
+    OBBDatasetReport,
+    check_obb_dataset,
+    check_obb_indexed_samples,
+    check_obb_label_text,
+    is_image_decodable,
+)
 from .split import split_dataset
 from .validation import DatasetGateError, DatasetGateReport, SplitGateReport, validate_dataset_gate
 
@@ -30,6 +44,8 @@ __all__ = [
     "check_dataset",
     "clamp01",
     "IndexedSample",
+    "build_split_consistency",
+    "identity_hash",
     "load_indexed_split",
     "load_indexed_splits",
     "membership_hash",
@@ -37,6 +53,8 @@ __all__ = [
     "OBBDatasetReport",
     "check_obb_dataset",
     "check_obb_indexed_samples",
+    "check_obb_label_text",
+    "is_image_decodable",
     "split_dataset",
     "DatasetGateError",
     "DatasetGateReport",

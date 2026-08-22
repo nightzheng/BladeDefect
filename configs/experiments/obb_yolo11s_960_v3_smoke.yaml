@@ -16,6 +16,6 @@ val: true
 save: true
 exist_ok: true
 project: runs/obb
-report: results/obb_v3_activation/obb_smoke_report.md
-prediction_output: results/obb_v3_activation/prediction_samples
-weight_provenance: results/obb_v3_activation/weight_provenance.json
+report: results/obb_v3/obb_smoke_report.md
+prediction_output: results/obb_v3/prediction_samples
+weight_provenance: results/obb_v3/weight_provenance.json

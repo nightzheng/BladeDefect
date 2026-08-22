@@ -61,12 +61,45 @@ def _relative_key(path: Path, root: Path) -> str:
     return path.relative_to(root).with_suffix("").as_posix().casefold()
 
 
-def _is_decodable(path: Path) -> bool:
+def is_image_decodable(path: Path) -> bool:
+    """Return True when OpenCV can decode the image file."""
     try:
         encoded = np.fromfile(path, dtype=np.uint8)
         return encoded.size > 0 and cv2.imdecode(encoded, cv2.IMREAD_COLOR) is not None
     except (OSError, ValueError, cv2.error):
         return False
+
+
+_is_decodable = is_image_decodable
+
+
+def check_obb_label_text(
+    text: str,
+    *,
+    num_classes: int,
+    min_area: float,
+) -> tuple[int, bool, list[tuple[str, str, int]]]:
+    """Validate OBB label text; returns (valid_instances, is_negative, issues).
+
+    Each issue is (error_type, message, line_number). An empty label marks a
+    negative image. Shared by dataset/indexed checks and the cached data gate
+    so label-format rules stay identical across entry points.
+    """
+    valid_instances = 0
+    issues: list[tuple[str, str, int]] = []
+    nonempty_lines = [
+        (number, line.split()) for number, line in enumerate(text.splitlines(), 1) if line.split()
+    ]
+    if not nonempty_lines:
+        return 0, True, issues
+    for line_number, tokens in nonempty_lines:
+        error = _line_error(tokens, num_classes, min_area)
+        if error is None:
+            valid_instances += 1
+        else:
+            error_type, message = error
+            issues.append((error_type, message, line_number))
+    return valid_instances, False, issues
 
 
 def _line_error(
@@ -151,19 +184,17 @@ def check_obb_dataset(
             )
             continue
         text = label_path.read_text(encoding="utf-8-sig")
-        nonempty_lines = [(number, line.split()) for number, line in enumerate(text.splitlines(), 1) if line.split()]
-        if not nonempty_lines:
+        valid, negative, issues = check_obb_label_text(
+            text, num_classes=num_classes, min_area=min_area
+        )
+        if negative:
             report.negative_images += 1
             continue
-        for line_number, tokens in nonempty_lines:
-            error = _line_error(tokens, num_classes, min_area)
-            if error is None:
-                report.valid_instances += 1
-            else:
-                error_type, message = error
-                report.issues.append(
-                    OBBDatasetIssue(relative_label, error_type, message, line_number)
-                )
+        report.valid_instances += valid
+        for error_type, message, line_number in issues:
+            report.issues.append(
+                OBBDatasetIssue(relative_label, error_type, message, line_number)
+            )
     return report
 
 
@@ -208,26 +239,25 @@ def check_obb_indexed_samples(
             continue
         report.labels += 1
         text = sample.label_path.read_text(encoding="utf-8-sig")
-        nonempty_lines = [
-            (number, line.split())
-            for number, line in enumerate(text.splitlines(), 1)
-            if line.split()
-        ]
-        if not nonempty_lines:
+        valid, negative, issues = check_obb_label_text(
+            text, num_classes=num_classes, min_area=min_area
+        )
+        if negative:
             report.negative_images += 1
             continue
-        for line_number, tokens in nonempty_lines:
-            error = _line_error(tokens, num_classes, min_area)
-            if error is None:
-                report.valid_instances += 1
-            else:
-                error_type, message = error
-                report.issues.append(
-                    OBBDatasetIssue(identity, error_type, message, line_number)
-                )
+        report.valid_instances += valid
+        for error_type, message, line_number in issues:
+            report.issues.append(
+                OBBDatasetIssue(identity, error_type, message, line_number)
+            )
     return report
 
 
 __all__ = [
-    "OBBDatasetIssue", "OBBDatasetReport", "check_obb_dataset", "check_obb_indexed_samples"
+    "OBBDatasetIssue",
+    "OBBDatasetReport",
+    "check_obb_dataset",
+    "check_obb_indexed_samples",
+    "check_obb_label_text",
+    "is_image_decodable",
 ]

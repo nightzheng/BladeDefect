@@ -30,6 +30,7 @@ from blade_defect.experiment.metadata import (
     utc_timestamp,
 )
 from blade_defect.utils import load_project_config, resolve_model_reference
+from blade_defect.utils.files import resolved_data_yaml
 
 
 OFFICIAL_WEIGHT = "yolo11s-obb.pt"
@@ -141,6 +142,8 @@ def validate_smoke_dataset(data_path: Path) -> tuple[dict[str, Any], list[Path]]
         "mode": "indexed" if indexed_mode else "directory",
         "validated_splits": ["train", "val"],
         "test_used": False,
+        "train_samples": reports["train"].images,
+        "val_samples": reports["val"].images,
         "train_instances": reports["train"].valid_instances,
         "val_instances": reports["val"].valid_instances,
     }, val_images
@@ -258,21 +261,24 @@ def run_smoke(config_path: str | Path) -> dict[str, Any]:
         from ultralytics import YOLO
 
         model = YOLO(str(official_weight))
-        train_started = time.perf_counter()
-        train_result = model.train(data=str(data_path), **config)
-        train_seconds = time.perf_counter() - train_started
-        save_dir = Path(getattr(train_result, "save_dir", None) or project / str(config["name"]))
-        best_weights = save_dir / "weights" / "best.pt"
-        last_weights = save_dir / "weights" / "last.pt"
-        if not best_weights.is_file():
-            raise RuntimeError(f"smoke training did not produce best weights: {best_weights}")
-        if not last_weights.is_file():
-            raise RuntimeError(f"smoke training did not produce last weights: {last_weights}")
+        # 派生 data.yaml 的 path 为 "."；Ultralytics 按当前工作目录解析相对 path，
+        # 必须先绝对化（与 seg 正式实验同一 resolved_data_yaml 链路）。
+        with resolved_data_yaml(data_path) as normalized_data:
+            train_started = time.perf_counter()
+            train_result = model.train(data=normalized_data, **config)
+            train_seconds = time.perf_counter() - train_started
+            save_dir = Path(getattr(train_result, "save_dir", None) or project / str(config["name"]))
+            best_weights = save_dir / "weights" / "best.pt"
+            last_weights = save_dir / "weights" / "last.pt"
+            if not best_weights.is_file():
+                raise RuntimeError(f"smoke training did not produce best weights: {best_weights}")
+            if not last_weights.is_file():
+                raise RuntimeError(f"smoke training did not produce last weights: {last_weights}")
 
-        trained = YOLO(str(best_weights))
-        validation_result = trained.val(
-            data=str(data_path), task="obb", imgsz=imgsz, device=device, workers=config.get("workers", 2)
-        )
+            trained = YOLO(str(best_weights))
+            validation_result = trained.val(
+                data=normalized_data, task="obb", imgsz=imgsz, device=device, workers=config.get("workers", 2)
+            )
         if not val_images:
             raise RuntimeError("validation split contains no images for prediction smoke")
         trained.predict(
@@ -294,6 +300,14 @@ def run_smoke(config_path: str | Path) -> dict[str, Any]:
         }
         if not (save_dir / "results.csv").is_file():
             raise RuntimeError(f"smoke training did not produce results.csv: {save_dir / 'results.csv'}")
+        # smoke 同样需要逐类指标（box 分支），与正式实验同一导出函数。
+        from blade_defect.evaluation import per_class_metrics_from_ultralytics
+        from blade_defect.experiment.runner import _write_per_class_metrics
+
+        _write_per_class_metrics(
+            per_class_metrics_from_ultralytics(validation_result),
+            save_dir / "per_class_metrics.csv",
+        )
         atomic_write_json(save_dir / "metrics.json", metrics_payload)
         atomic_write_json(save_dir / "environment.json", environment)
         manifest = create_run_manifest(

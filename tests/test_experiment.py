@@ -70,10 +70,10 @@ def test_analyze_experiments_generates_expanded_artifacts(tmp_path: Path) -> Non
 
     outputs = analyze_experiments(summary, tmp_path / "runs", results / "analysis")
 
+    # 6ad866c 起 analyzer 收窄为 5 个图表工件；深度分析迁移至 v3_analysis 工具链。
     core_expected = {
-        "model_comparison.csv", "per_class_metrics.csv", "model_comparison.png",
-        "input_size_map.png", "input_size_fps.png", "pr_curve.png", "f1_curve.png",
-        "confusion_matrix.png", "class_distribution.png", "loss_curve_comparison.png",
+        "model_comparison.png", "accuracy_speed_tradeoff.png", "f1_curve.png",
+        "input_size_map.png", "input_size_fps.png",
     }
     assert core_expected.issubset({path.name for path in outputs})
     assert all(path.stat().st_size > 0 for path in outputs)

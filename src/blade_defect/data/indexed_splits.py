@@ -123,8 +123,74 @@ def membership_hash(samples_by_split: dict[str, list[IndexedSample]]) -> str:
     return digest.hexdigest()
 
 
+def identity_hash(sample_ids: Iterable[str]) -> str:
+    """Hash sorted sample IDs of one split; shared by all dataset gates."""
+    digest = hashlib.sha256()
+    for sample_id in sorted(sample_ids):
+        digest.update(f"{sample_id}\n".encode("utf-8"))
+    return digest.hexdigest()
+
+
+def build_split_consistency(
+    samples_by_split: dict[str, list[IndexedSample]],
+    dataset_root: str | Path,
+    splits: Iterable[str] = ("train", "val", "test"),
+) -> dict[str, Any]:
+    """Build the split-consistency verdict shared by every dataset gate.
+
+    Compares live-recomputed identity/membership fingerprints against the
+    dataset manifest and enforces cross-split disjointness plus the test
+    integrity-only policy. Gates must not re-implement this logic locally.
+    """
+    import json
+
+    split_list = list(splits)
+    sets = {split: {sample.sample_id for sample in samples_by_split[split]} for split in split_list}
+    overlaps = {
+        f"{left}_{right}": sorted(sets[left] & sets[right])
+        for index, left in enumerate(split_list)
+        for right in split_list[index + 1 :]
+    }
+    current_hashes = {
+        split: identity_hash(sample.sample_id for sample in samples_by_split[split])
+        for split in split_list
+    }
+    manifest_path = Path(dataset_root) / "dataset_manifest.json"
+    manifest = (
+        json.loads(manifest_path.read_text(encoding="utf-8-sig"))
+        if manifest_path.is_file()
+        else {}
+    )
+    parent_hashes = manifest.get("parent_split_identity_sha256", {})
+    derived_hashes = manifest.get("derived_split_identity_sha256", {})
+    consistency: dict[str, Any] = {
+        "split_identity_sha256": current_hashes,
+        "parent_split_identity_sha256": parent_hashes,
+        "derived_manifest_identity_sha256": derived_hashes,
+        "parent_equals_derived": {
+            split: bool(parent_hashes.get(split)) and parent_hashes.get(split) == current_hashes[split]
+            for split in split_list
+        },
+        "cross_split_overlap_counts": {key: len(value) for key, value in overlaps.items()},
+        "membership_sha256": membership_hash(samples_by_split),
+        "manifest_membership_sha256": manifest.get("derived_membership_sha256"),
+        "test_data_integrity_only": not bool(
+            manifest.get("test_policy", {}).get("allowed_for_training", True)
+        ),
+    }
+    consistency["valid"] = (
+        all(consistency["parent_equals_derived"].values())
+        and not any(consistency["cross_split_overlap_counts"].values())
+        and consistency["membership_sha256"] == consistency["manifest_membership_sha256"]
+        and consistency["test_data_integrity_only"]
+    )
+    return consistency
+
+
 __all__ = [
     "IndexedSample",
+    "build_split_consistency",
+    "identity_hash",
     "label_path_for_image",
     "load_index_config",
     "load_indexed_split",

@@ -1,0 +1,3 @@
+# v3 正式 baseline 的关键训练框架版本。
+# CUDA/PyTorch 仍按目标机器驱动安装，运行入口会把实际环境写入 manifest。
+ultralytics==8.4.90

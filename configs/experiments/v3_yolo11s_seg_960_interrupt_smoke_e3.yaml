@@ -1,0 +1,24 @@
+project_root: ../..
+model: yolo11s-seg.pt
+data: results/v3_smoke/parent_sample_400/data.yaml
+epochs: 3
+imgsz: 960
+batch: 2
+device: 0
+workers: 2
+project: runs/v3_smoke
+name: v3_yolo11s_seg_960_interrupt_smoke_e3
+patience: 10
+seed: 42
+pretrained: true
+cache: false
+amp: true
+val: true
+save: true
+save_period: 1
+exist_ok: true
+plots: false
+label_level: fine
+notes: >-
+  仅用于真实进程中断和 last.pt resume 验证。数据为 v3 正式 split 内确定性
+  索引抽样，各 split 400 张，不复制图片；不得作为正式指标。

@@ -1,0 +1,16 @@
+schema_version: 1
+project_root: ..
+required_versions:
+  python: "3.10"
+  ultralytics: "8.4.90"
+tasks:
+  seg:
+    config: configs/experiments/v3_yolo11s_seg_960_interrupt_smoke_e5.yaml
+    experiment_id: v3_yolo11s_seg_960_interrupt_smoke_e5
+    task: segment
+    total_epochs: 5
+  obb:
+    config: configs/experiments/obb_yolo11s_960_v3_sample_activation_smoke.yaml
+    experiment_id: obb_yolo11s_960_v3_sample_activation_smoke
+    task: obb
+    total_epochs: 1

@@ -22,14 +22,21 @@ Set-ExecutionPolicy -Scope CurrentUser RemoteSigned
 这会修改当前 Windows 用户的 PowerShell 执行策略，请先确认符合所在单位的安全要求。
 
 VSCode 有时会自动激活项目中的 `.venv`。请通过“Python: Select Interpreter”选择 Conda 的
-`bladedefect` 解释器。典型路径示例为：
+`bladedefect` 解释器。不要把解释器绝对路径写入项目配置；激活环境后可用下列命令确认当前
+解释器，实际位置由当前机器的 Conda 安装决定：
 
-```text
-D:\miniconda\envs\bladedefect\python.exe
+```powershell
+python -c "import sys; print(sys.executable)"
+python -c "import ultralytics; print(ultralytics.__version__)"
 ```
 
-实际位置取决于 Miniconda/Anaconda 的安装目录，可用 `conda env list` 查看，不要把该示例路径写入
-项目配置。
+`environment.yml` 将正式 v3 所需的 Ultralytics 固定为 8.4.90。已有环境可跨平台同步更新：
+
+```powershell
+conda env update --name bladedefect --file environment.yml
+conda activate bladedefect
+python -m pip check
+```
 
 ## Linux 与算力服务器
 

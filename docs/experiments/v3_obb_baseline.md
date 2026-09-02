@@ -1,13 +1,13 @@
 # v3 OBB 正式 baseline 执行说明
 
-本文记录正式 v3（blade-v3-grouped-202608）OBB 派生数据激活、真实 smoke 与 50 epochs 正式 baseline 的执行链路与口径。转换/校验/训练入口复用负责人既有实现（`convert_seg_to_obb.py`、`check_obb_dataset.py`、`visualize_obb_labels.py`、`run_obb_smoke.py`），不重新实现转换算法。
+本文记录正式 v3（blade-v3-grouped-202608）OBB 派生数据激活、真实 smoke 与 200 epochs 正式 baseline 的执行链路与口径。转换/校验/训练入口复用负责人既有实现（`convert_seg_to_obb.py`、`check_obb_dataset.py`、`visualize_obb_labels.py`、`run_obb_smoke.py`），不重新实现转换算法。
 
 ## 口径声明
 
 - **自动 OBB 来自 polygon 最小外接矩形**（`cv2.minAreaRect`，角点按"顶部最左起顺时针"排序），**不等同于人工旋转框真值**；所有 OBB 指标均为该自动标注口径。
 - OBB 与 seg 只比较**共有 Box 指标**（Precision/Recall/mAP50/mAP50-95）、逐类 AP 与速度，**不比较 Mask mAP**（OBB 无 Mask 分支）。
 - test 保持锁定：仅参与转换与数据完整性校验，不用于训练、验证、best epoch、阈值选择或预测样例选择；本周不运行任何 test 评估。
-- smoke（1 epoch）与正式 baseline（50 epochs）分开标记，smoke 指标不得冒充正式结果。
+- smoke（1 epoch）与正式 baseline（200 epochs）分开标记，smoke 指标不得冒充正式结果。
 
 ## 数据身份
 
@@ -21,7 +21,7 @@
 
 派生方式为 txt 清单驱动：图像硬链接（不复制）、标签逐实例 polygon→OBB 转换；失败策略为"只丢弃失败实例，保留图像与同图其他实例"，全部 warning/error 记录在 `results/obb_v3/invalid_obb_labels.csv`。
 
-> 注意：转换器按可移植契约写 `path: .`，而 Ultralytics 将相对 `path` 按**当前工作目录**解析。交给 Ultralytics 训练/验证前必须绝对化——smoke 复用 `resolved_data_yaml`（与 seg 正式实验同一链路）；正式 baseline 在 `runs/v3_yolo11s_obb_960_e50/normalized_data.yaml` 落盘稳定副本（train/val 清单条目绝对化、不含 test 键），断点续训时 checkpoint 记录的同一路径仍然有效。
+> 注意：转换器按可移植契约写 `path: .`，而 Ultralytics 将相对 `path` 按**当前工作目录**解析。交给 Ultralytics 训练/验证前必须绝对化——smoke 复用 `resolved_data_yaml`（与 seg 正式实验同一链路）；正式 baseline 在 `runs/v3_yolo11s_obb_960_e200/normalized_data.yaml` 落盘稳定副本（train/val 清单条目绝对化、不含 test 键），断点续训时 checkpoint 记录的同一路径仍然有效。
 
 ## 执行链路
 
@@ -49,14 +49,16 @@ python scripts/activate_v3_obb_pipeline.py
 python scripts/run_obb_smoke.py --config configs/experiments/obb_yolo11s_960_v3_smoke.yaml
 
 # 5) batch 真实显存校准（短探针训练；不写正式 run）
-python scripts/run_v3_obb_baseline.py --config configs/experiments/v3_yolo11s_obb_960_e50.yaml `
+python scripts/run_v3_obb_baseline.py --config configs/experiments/v3_yolo11s_obb_960_e200.yaml `
   --calibrate-only --calibrate-batch 8
 
-# 6) 正式 50 epochs baseline（自动断点续训；每 5 轮 checkpoint）
-python scripts/run_v3_obb_baseline.py --config configs/experiments/v3_yolo11s_obb_960_e50.yaml
+# 6) 正式 200 epochs baseline（自动断点续训；每 5 轮 checkpoint）
+python scripts/run_v3_baselines.py run --task obb --device 0
 
 # 7) 与 15 类 seg 的共有 Box 指标对比（OBB 未完成时只输出状态，不编造数值）
-python scripts/compare_obb_seg_common_metrics.py
+python scripts/compare_obb_seg_common_metrics.py `
+  --obb-run runs/v3_yolo11s_obb_960_e200 `
+  --seg-run runs/v3_yolo11s_seg_960_e200
 ```
 
 ## 权重溯源
@@ -73,7 +75,7 @@ python scripts/compare_obb_seg_common_metrics.py
 |---|---|---|
 | task / model | obb / yolo11s-obb.pt | obb / yolo11s-obb.pt |
 | imgsz | 960 | 960 |
-| epochs | 1 | 50 |
+| epochs | 1 | 200（`patience=0`，禁用早停） |
 | batch | 4（继承负责人既有 smoke 配置） | 8（按真实显存探针校准，见 `results/obb_v3/batch_calibration.json`） |
 | workers | 2 | 4 |
 | device / seed | 0 / 42 | 0 / 42 |
@@ -82,7 +84,7 @@ python scripts/compare_obb_seg_common_metrics.py
 
 ## 工件与可追溯性
 
-正式 baseline `runs/v3_yolo11s_obb_960_e50/`：
+正式 baseline `runs/v3_yolo11s_obb_960_e200/`：
 
 - `environment.json`：与 seg 正式实验同一 schema（`collect_environment_metadata`）；
 - `run_manifest.json`：experiment_id、dataset_id、parent_dataset_id、code_commit、hardware、
@@ -98,7 +100,9 @@ python scripts/compare_obb_seg_common_metrics.py
 
 ## 结果归档（交付分析负责人）
 
-`scripts/archive_experiment_assets.py` 为 15 类 e100 与 6 类 e50 两项 seg 正式实验生成：
+以下归档说明针对既有历史 15 类 e100 与 6 类 e50 结果；新的 e200 主实验完成后应以
+e200 运行目录生成独立归档，不覆盖历史工件。`scripts/archive_experiment_assets.py` 为历史两项
+seg 正式实验生成：
 
 - `results/v3_experiment_handoff/experiment_inventory.csv`：experiment_id、dataset_id、
   label_level、code_commit、关键指标、环境、资产统计；

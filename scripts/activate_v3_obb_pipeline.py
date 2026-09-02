@@ -83,8 +83,14 @@ def activate_pipeline(
     if not precheck["valid"]:
         raise RuntimeError("只读预检未通过，先处理数据问题再执行正式转换")
 
+    # 正式 v3 体量很大，禁止 auto 在硬链接失败时静默退回整库复制。
+    # 若当前卷或权限不支持硬链接，应立即失败并保留磁盘空间。
     conversion = convert_indexed_dataset(
-        source_data, output, results_root, overwrite=overwrite
+        source_data,
+        output,
+        results_root,
+        overwrite=overwrite,
+        image_mode="hardlink",
     )
     summary["conversion"] = {
         "valid": conversion["valid"],

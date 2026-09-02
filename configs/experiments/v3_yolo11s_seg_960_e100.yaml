@@ -1,6 +1,6 @@
 project_root: ../..
 model: yolo11s-seg.pt
-data: datasets/blade-v3-grouped-202608/data.yaml
+data: datasets/v3-index-rebuild/blade-v3-grouped-202608/data.yaml
 epochs: 100
 imgsz: 960
 batch: 8

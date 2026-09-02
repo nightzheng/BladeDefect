@@ -1,6 +1,7 @@
 # v3 无泄漏训练计划（blade-v3-grouped-202608）
 
-状态：**等待负责人发布 v3 数据集**。数据集到达后按本计划执行，全程 test 锁定。
+状态：**v3 seg 与派生 OBB 数据均已就绪**。正式主实验统一为单阶段连续 200 轮，
+全程 test 锁定。
 
 ## 数据版本核对（任务 1）
 
@@ -24,12 +25,13 @@
 
 | 步骤 | 内容 | 命令 |
 |---|---|---|
-| 1 | 数据核对 + split 隔离校验 | `python -c "from blade_defect.data.split_isolation import assert_test_split_isolation; assert_test_split_isolation('datasets/blade-v3-grouped-202608/data.yaml')"` |
-| 2 | 1 epoch 吞吐校准（v3 规模） | `python scripts/run_full_primary.py --config configs/experiments/v3_yolo11s_seg_960_e100.yaml --epochs 1 --run-name v3_throughput_calibration` |
-| 3 | 100 epochs 主实验（15 类） | `python scripts/run_full_primary.py --config configs/experiments/v3_yolo11s_seg_960_e100.yaml` |
+| 1 | 数据核对 + split 隔离校验 | `python -c "from blade_defect.data.split_isolation import assert_test_split_isolation; assert_test_split_isolation('datasets/v3-index-rebuild/blade-v3-grouped-202608/data.yaml')"` |
+| 2 | 1 epoch 吞吐校准（v3 规模） | `python scripts/run_full_primary.py --config configs/experiments/v3_yolo11s_seg_960_e200.yaml --epochs 1 --run-name v3_throughput_calibration` |
+| 3 | 200 epochs 主实验（15 类） | `python scripts/run_v3_baselines.py run --task seg --device 0` |
 | 4 | 6 类正式实验（50 epochs） | `python scripts/run_full_primary.py --config configs/experiments/v3_hier_coarse_yolo11s_seg_960_e50.yaml` |
 
-两个实验统一 batch=8、seed=42、YOLO11s-seg@960、从官方预训练权重启动；
+15 类正式主实验使用 batch=8、seed=42、YOLO11s-seg@960、从官方预训练权重
+启动并设置 `patience=0`，确保完整执行 200 轮；
 checkpoint 每 5 轮保存，中断后直接重跑同一命令即可断点续训（自动检测
 `weights/last.pt`）；中断检测用 `python scripts/check_run_status.py`。
 
@@ -43,7 +45,7 @@ checkpoint 每 5 轮保存，中断后直接重跑同一命令即可断点续训
 
 ## 结果命名与交付
 
-- 15 类主实验：`runs/v3_yolo11s_seg_960_e100/`（label_level=fine）
+- 15 类主实验：`runs/v3_yolo11s_seg_960_e200/`（label_level=fine）
 - 6 类正式实验：`runs/v3_hier_coarse_yolo11s_seg_960_e50/`（label_level=coarse）
 - 两者 experiment_id 不同，6 类结果与 15 类预测聚合结果分开汇总；
 - 每次 validation 导出 Mask/Box 分支指标，训练结束输出 per_class_metrics.csv

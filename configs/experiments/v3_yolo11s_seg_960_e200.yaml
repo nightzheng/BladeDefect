@@ -1,0 +1,25 @@
+project_root: ../..
+model: yolo11s-seg.pt
+data: datasets/v3-index-rebuild/blade-v3-grouped-202608/data.yaml
+epochs: 200
+imgsz: 960
+batch: 8
+device: auto
+workers: 4
+project: runs
+name: v3_yolo11s_seg_960_e200
+patience: 0
+seed: 42
+pretrained: true
+cache: false
+amp: true
+val: true
+save: true
+save_period: 5
+exist_ok: true
+label_level: fine
+notes: >-
+  无泄漏主实验：blade-v3-grouped-202608（15 类），从官方 yolo11s-seg.pt
+  重新开始单阶段连续训练 200 轮；patience=0 禁用早停。禁止继承旧全量 split
+  或中断 e100 运行的权重。训练只使用 train/val，test 锁定，正式 test 评估
+  等待负责人批准。

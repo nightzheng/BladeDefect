@@ -1,4 +1,4 @@
-path: ../datasets/blade-v3-grouped-202608
+path: ../datasets/v3-index-rebuild/blade-v3-grouped-202608
 train: train.txt
 val: val.txt
 test: test.txt

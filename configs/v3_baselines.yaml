@@ -1,0 +1,16 @@
+schema_version: 1
+project_root: ..
+required_versions:
+  python: "3.10"
+  ultralytics: "8.4.90"
+tasks:
+  seg:
+    config: configs/experiments/v3_yolo11s_seg_960_e200.yaml
+    experiment_id: v3_yolo11s_seg_960_e200
+    task: segment
+    total_epochs: 200
+  obb:
+    config: configs/experiments/v3_yolo11s_obb_960_e200.yaml
+    experiment_id: v3_yolo11s_obb_960_e200
+    task: obb
+    total_epochs: 200

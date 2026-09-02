@@ -1,0 +1,25 @@
+project_root: ../..
+name: v3_yolo11s_obb_960_e200
+task: obb
+model: yolo11s-obb.pt
+data: datasets/blade-v3-grouped-obb/data.yaml
+epochs: 200
+imgsz: 960
+batch: 8
+device: 0
+workers: 4
+patience: 0
+seed: 42
+pretrained: true
+cache: false
+amp: true
+val: true
+save: true
+save_period: 5
+exist_ok: true
+project: runs
+label_level: fine
+notes: >-
+  正式 v3 OBB baseline（15 类），从官方 yolo11s-obb.pt 重新开始单阶段连续
+  训练 200 轮；patience=0 禁用早停。自动 OBB 来自 polygon 最小外接矩形，
+  非人工旋转框真值。训练/验证/best epoch/阈值选择只使用 train/val，test 锁定。

@@ -19,7 +19,8 @@ dependencies:
   - opencv
   - pytest
   - pip:
-      - ultralytics
+      # 正式 v3 baseline 的统一入口会校验此精确版本。
+      - ultralytics==8.4.90
       - streamlit
       - gradio
       - rich

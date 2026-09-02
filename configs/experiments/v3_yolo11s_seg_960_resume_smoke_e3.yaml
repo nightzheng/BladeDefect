@@ -1,0 +1,24 @@
+project_root: ../..
+model: yolo11s-seg.pt
+data: results/obb_v3_activation/sample_activation/parent_sample/data.yaml
+epochs: 3
+imgsz: 960
+batch: 2
+device: 0
+workers: 2
+project: runs/v3_smoke
+name: v3_yolo11s_seg_960_resume_smoke_e3
+patience: 10
+seed: 42
+pretrained: true
+cache: false
+amp: true
+val: true
+save: true
+save_period: 1
+exist_ok: true
+plots: false
+label_level: fine
+notes: >-
+  仅用于验证统一入口、意外中断 resume 和完成后阶段式扩轮。使用 v3 正式
+  split 内确定性抽取的 train/val/test 各 40 张样本；不得作为正式指标。

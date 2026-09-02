@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from typing import Any
 
@@ -11,6 +12,13 @@ from blade_defect.utils.paths import resolve_model_reference, resolve_path
 
 
 def _load_yolo():
+    # 某些受管 Windows 环境无法读取默认的 %APPDATA%/Ultralytics。
+    # 在导入 ultralytics（其导入期即读取 settings.json）前切换到项目内
+    # 可写目录；显式的 YOLO_CONFIG_DIR 仍保持最高优先级。
+    if "YOLO_CONFIG_DIR" not in os.environ:
+        config_root = Path(__file__).resolve().parents[3] / "runs" / ".ultralytics-config"
+        (config_root / "Ultralytics").mkdir(parents=True, exist_ok=True)
+        os.environ["YOLO_CONFIG_DIR"] = str(config_root)
     try:
         from ultralytics import YOLO
     except ImportError as exc:

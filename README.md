@@ -19,6 +19,16 @@ conda activate bladedefect
 python -m pip install -e .
 ```
 
+后续训练和测试统一调用激活环境中的 `python`，不要在命令或配置中写死 Conda 安装路径：
+
+```powershell
+python scripts/run_v3_baselines.py status
+python scripts/run_v3_baselines.py run --task all --device 0
+```
+
+`environment.yml` 固定正式 v3 所需的 Ultralytics 版本；环境名称可在创建时覆盖，运行入口
+不依赖环境名称、Windows 盘符或 Miniconda/Anaconda 的安装位置。
+
 ### 备选：pip
 
 如不使用 Conda，可保留并使用原有的 `requirements.txt` 安装方式：

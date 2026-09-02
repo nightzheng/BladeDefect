@@ -55,6 +55,8 @@ def run_primary(
     device: str | None = None,
     resume: bool = True,
     force: bool = False,
+    initial_checkpoint: str | Path | None = None,
+    continuation: dict | None = None,
 ) -> dict:
     train_config, project_root = load_project_config(config, path_fields=("data", "project"))
     data_path = resolve_path(train_config["data"], project_root)
@@ -94,6 +96,10 @@ def run_primary(
         )
     if resume_active:
         model_source: str | Path = last_pt
+    elif initial_checkpoint is not None:
+        model_source = resolve_path(initial_checkpoint, project_root)
+        if not Path(model_source).is_file():
+            raise FileNotFoundError(f"续训起始权重不存在：{model_source}")
     else:
         model_source = resolve_model_reference(model_ref, project_root)
 
@@ -113,6 +119,10 @@ def run_primary(
         "status": "running",
         "resume_supported": True,
         "resumed_from": str(last_pt) if resume_active else None,
+        "initial_checkpoint": (
+            str(model_source) if initial_checkpoint is not None and not resume_active else None
+        ),
+        "continuation": continuation,
     }
     save_json(manifest, manifest_path)
 
@@ -153,7 +163,7 @@ def run_primary(
         imgsz = int(train_config.get("imgsz", 960))
         raw_result = evaluator.validate(
             data_path, imgsz=imgsz, device=train_config.get("device", "auto"),
-            normalize_data_yaml=True,
+            normalize_data_yaml=True, plots=bool(train_config.get("plots", True)),
         )
         extended = extended_metrics_from_ultralytics(raw_result)
         record = {
@@ -175,6 +185,12 @@ def run_primary(
             "fps_method": FPS_METHOD,
             "status": "ok",
         }
+        if continuation:
+            record.update(
+                stage_epochs=continuation.get("stage_epochs"),
+                cumulative_target_epochs=continuation.get("cumulative_target_epochs"),
+                continuation_from=continuation.get("parent_run"),
+            )
         save_json(record, run_dir / "metrics.json")
         _write_per_class_metrics(
             per_class_metrics_from_ultralytics(raw_result), run_dir / "per_class_metrics.csv"
@@ -209,6 +225,10 @@ def main() -> None:
     parser.add_argument("--device", default=None)
     parser.add_argument("--no-resume", action="store_true", help="即使存在 last.pt 也从头训练")
     parser.add_argument("--force", action="store_true", help="允许覆盖已完成运行或已有权重")
+    parser.add_argument(
+        "--initial-checkpoint", type=Path, default=None,
+        help="从已完成实验的 best.pt/last.pt 开始新的微调阶段（不恢复优化器）",
+    )
     args = parser.parse_args()
     result = run_primary(
         config=args.config,
@@ -217,6 +237,7 @@ def main() -> None:
         device=args.device,
         resume=not args.no_resume,
         force=args.force,
+        initial_checkpoint=args.initial_checkpoint,
     )
     print(json.dumps(result, ensure_ascii=False, indent=2, default=str))
 

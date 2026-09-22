@@ -22,6 +22,9 @@ python scripts/run_v3_baselines.py status
 
 状态检查不启动训练，输出版本匹配、数据可用性、实验状态与 `last.pt` 恢复能力。
 
+当前状态（2026-09-22）：seg 已在 117/200 主动封存为 `stopped_early`，最佳轮次为
+e89；OBB 已在 82/200 主动封存，最佳轮次为 e81。旧 e50/e100 目录只作为历史结果保留。
+
 ## 首次训练与中断恢复
 
 ```powershell
@@ -38,16 +41,83 @@ python scripts/run_v3_baselines.py run --task all --device 0
 意外中断时重新执行同一条 `run` 命令。只要当前阶段存在 `weights/last.pt`，就恢复
 optimizer、scheduler、best fitness 和下一 epoch，继续到该阶段原定目标轮次。
 
+## 平台期主动停止
+
+正在训练时请求在当前 epoch 完整结束、验证并保存 checkpoint 后停止：
+
+```powershell
+python scripts/run_v3_baselines.py stop --task seg --reason "validation plateau"
+```
+
+新启动的 SEG/OBB 训练会在 epoch 边界读取 `stop_request.json`，不会在一个 epoch 的中间
+留下半轮 checkpoint。若训练进程已经由人工或系统停止，可直接封存现有结果：
+
+```powershell
+python scripts/run_v3_baselines.py seal --task seg --reason "validation plateau"
+```
+
+`seal` 要求已有 `results.csv` 和 `weights/last.pt`，生成 `early_stop_summary.json`，把
+manifest 标记为 `stopped_early`，并关闭自动恢复。后续再次执行 `run --task seg` 会跳过
+该实验，因此可安全进入曲线、最佳 epoch、逐类表现与误检漏检分析。`seal` 不运行 test。
+
+对已经封存的运行补生成 Ultralytics 原生图：
+
+```powershell
+# 仅从 results.csv 生成训练/验证随 epoch 变化的 results.png（不占 GPU）
+python scripts/run_v3_baselines.py plots --task seg --training-only
+
+# 使用 best.pt 在 val 上补生成 PR/F1/P/R 与混淆矩阵（需要 GPU）
+python scripts/run_v3_baselines.py plots --task seg --device 0
+```
+
+第二条命令固定使用 val 且记录 `test_used=false`；若另一个训练任务正在占用同一张 GPU，
+先使用 `--training-only`，待 GPU 空闲后再补全验证图。
+
+## 预计收敛轮数
+
+- **seg**：本次正式曲线显示主收敛区间约 e80–e95，稳健停止区间约 e105–e120；
+  实际最佳 e89，并在 e117 封存。200 轮仅为预算上限。
+- **OBB**：本次正式曲线的主收敛区间约 e70–e82，最佳 e81，并在 e82 封存；
+  最后 10 轮相对前 10 轮 Box mAP50-95 均值仅 +0.00124。未来同口径从头训练建议
+  预算 90 epochs。
+
+## 提分实验统一入口
+
+封存后的基线只作参考，不使用 `extend` 继续堆轮次。新的参数实验从 `best.pt` 分叉：
+
+```powershell
+# Windows/Linux 付费节点开跑前均先执行全量预检
+python scripts/run_v3_score_sweep.py preflight --require-cuda
+
+# 查看全部假设、参数和输出目录，不启动训练
+python scripts/run_v3_score_sweep.py plan --stage all
+
+# 单卡顺序运行第一阶段：AdamW/cosine 与 1280 小目标方案
+python scripts/run_v3_score_sweep.py run --task all --stage 1 --device 0
+
+# stage 1 达标后才运行增强分支；--stage all 会自动应用此门槛
+python scripts/run_v3_score_sweep.py run --task all --stage all --device 0
+
+# 任意时刻从已有工件重建排名和人工复核表
+python scripts/run_v3_score_sweep.py analyze
+```
+
+完整实验矩阵在 `configs/v3_score_sweep.yaml`。自动候选门槛是主指标绝对提升至少
+0.002、FPS 降幅不超过 20%，且任一单类 AP50-95 降幅不超过 0.02；自动排名不能替代
+人工检查逐类 AP、混淆矩阵及失败样例。
+
+这些命令本身不依赖 PowerShell，可在 Linux bash 中原样逐行执行。跨系统同步时不要复制
+运行目录中的 `normalized_data.yaml`、绝对化 txt 或 cache view；完整部署步骤见
+[`../linux_v3_training.md`](../linux_v3_training.md)。
+
 ## 完成后增加训练轮次
 
 ```powershell
 # seg e200 完成后，从 best.pt 新建 50 epoch 微调阶段（累计目标 e250）
-python scripts/run_v3_baselines.py extend `
-  --task seg --add-epochs 50 --device 0
+python scripts/run_v3_baselines.py extend --task seg --add-epochs 50 --device 0
 
 # OBB 同理；若要从最后一轮而非最佳轮权重开始
-python scripts/run_v3_baselines.py extend `
-  --task obb --add-epochs 50 --weights last --device 0
+python scripts/run_v3_baselines.py extend --task obb --add-epochs 50 --weights last --device 0
 ```
 
 默认选择该任务累计轮次最大的已完成阶段作为父阶段。输出使用新目录，例如：

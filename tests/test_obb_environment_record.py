@@ -167,6 +167,10 @@ def test_obb_runner_records_environment_and_manifest(tmp_path: Path, monkeypatch
     assert manifest["dataset_id"] == "blade-v3-grouped-obb"
     assert manifest["test_used"] is False
     assert manifest["validated_splits"] == ["train", "val"]
+    assert manifest["dataset_gate"]["decision"] in {"cold", "hit", "partial", "bootstrap"}
+    assert manifest["dataset_gate"]["cache_path"].endswith(
+        "obb_train_val_validation_cache.json"
+    )
     assert manifest["started_at"] and manifest["finished_at"]
     assert manifest["resume_supported"] is True
     hardware = manifest["hardware"]
@@ -237,6 +241,17 @@ def test_materialize_absolute_data_yaml_creates_missing_parent(tmp_path: Path) -
         assert list_path.is_absolute() and list_path.is_file()
         entries = list_path.read_text(encoding="utf-8").splitlines()
         assert entries and all(Path(entry).is_absolute() for entry in entries)
+        assert all(Path(entry).is_file() for entry in entries)
+
+    # train/val may share one physical source directory, but their Ultralytics
+    # label-cache locations must remain distinct to avoid alternating rescans.
+    train_image = Path(Path(payload["train"]).read_text(encoding="utf-8").splitlines()[0])
+    val_image = Path(Path(payload["val"]).read_text(encoding="utf-8").splitlines()[0])
+    from ultralytics.data.utils import img2label_paths
+
+    train_cache = Path(img2label_paths([str(train_image)])[0]).parent.with_suffix(".cache")
+    val_cache = Path(img2label_paths([str(val_image)])[0]).parent.with_suffix(".cache")
+    assert train_cache != val_cache
 
 
 def test_calibrate_batch_rejects_invalid_fraction(tmp_path: Path) -> None:

@@ -4,8 +4,21 @@
 > [docs/EXPERIMENTS.md](docs/EXPERIMENTS.md)。
 > 实验版本、数据哈希和运行环境追溯规则见 [docs/experiment_registry.md](docs/experiment_registry.md)。
 
-面向风机叶片无人机巡检的 YOLO segmentation 缺陷检测工程模板。项目支持
-Ultralytics YOLOv8/YOLO11 的训练、验证与推理，并为后续 RGB-T 配准和融合预留接口。
+面向风机叶片无人机巡检的 YOLO 缺陷检测工程。当前正式版本为 v3，支持
+YOLO11 segmentation 与由 polygon 自动派生的 OBB baseline，并提供统一的训练、断点恢复、
+扩轮、验证和结果追溯入口；RGB-T 配准与融合接口仍作为后续扩展保留。
+
+当前正式数据与实验入口：
+
+- segmentation：`datasets/v3-index-rebuild/blade-v3-grouped-202608/data.yaml`
+- OBB：`datasets/blade-v3-grouped-obb/data.yaml`
+- 统一入口：`python scripts/run_v3_baselines.py status|run|stop|seal|plots|extend`
+- 正式预算：YOLO11s @ 960，seg / OBB 上限各 200 epochs；达到平台期可提前封存
+- 当前进度（2026-09-19）：seg 在 117/200 主动停止（最佳 epoch 89）；OBB e200 正在训练
+- 经验收敛区间：seg 主收敛约 80–95、稳健停止约 105–120；OBB 暂估 80–120，需在 e60/e80 复核
+
+v3 的完整执行说明见 [docs/experiments/v3_unified_runner.md](docs/experiments/v3_unified_runner.md)，
+数据卡见 [docs/dataset_card_blade_v3.md](docs/dataset_card_blade_v3.md)。
 
 ## 环境安装
 
@@ -61,9 +74,13 @@ device: auto
 `data.yaml` 中的 `path` 以该 YAML 文件所在目录为基准。运行时会生成临时的规范化配置，将数据集
 根目录转换为绝对路径和正斜杠，避免工作目录或 Windows 反斜杠影响 Ultralytics。
 
-## 数据格式
+## v3 数据与标注格式
 
-数据集采用 Ultralytics YOLO-seg 格式：
+正式 v3 数据集共 48,291 张图片，按分组规则固定为 train 33,804、val 7,244、
+test 7,243；三份清单互不重叠。test 仅用于最终获批评估，不参与训练、best epoch、
+阈值或模型选择。
+
+segmentation 标注采用 Ultralytics YOLO-seg 格式：
 
 当前数据集包含 15 类风机叶片缺陷（类别 ID 为 0-14），完整类别名称以
 [`configs/data.yaml`](configs/data.yaml) 为准。类别按缺陷性质分为：
@@ -76,16 +93,12 @@ device: auto
 - 附件脱落：14
 
 ```text
-datasets/blade/
-├── images/
-│   ├── train/
-│   ├── val/
-│   └── test/
-├── labels/
-│   ├── train/
-│   ├── val/
-│   └── test/
-└── data.yaml
+datasets/
+├── v3-index-rebuild/
+│   ├── blade-v3-grouped-202608/  # seg 的 data.yaml 与固定 split 清单
+│   └── blade-v2/                 # v3 清单使用的兼容数据入口，请勿单独删除
+├── blade-v2-rebuild-v3-index/    # v3 seg 所需的底层图片联接与冻结标签
+└── blade-v3-grouped-obb/         # v3 OBB 派生数据、清单与标签
 ```
 
 每行标注格式为：
@@ -95,6 +108,10 @@ class_id x1 y1 x2 y2 ... xn yn
 ```
 
 坐标均归一化到 `[0, 1]`，每个多边形至少包含 3 个点。
+
+OBB 标注由 v3 polygon 通过 `cv2.minAreaRect` 一对一派生，不等同于人工旋转框真值。
+seg 与 OBB 只比较共有的 Box 指标，不比较 Mask mAP。详见
+[docs/experiments/v3_obb_baseline.md](docs/experiments/v3_obb_baseline.md)。
 
 ## 常用命令
 
@@ -154,41 +171,55 @@ soft error修正结果写入新数据集的同名标签，所有处理均不会�
 hard error不会自动删除；生成流程会停止并保留问题样本，
 待人工确认后修复，或通过 `dataset_filter.yaml` 明确排除。
 
-## blade-v2 正式数据版本
+## v3 正式数据版本
 
-第二周已冻结 `datasets/blade-v2`。该版本保留源train/val划分，通过 `train.txt`、`val.txt`
-固定48,291张有效图片；修正后的48,291个标签实际保存在 `labels/train|val`。由于原图约
-180.15GB且本地空间不足，`images/train|val` 使用NTFS目录联接只读访问 `D:\images`，
-训练和统计必须使用清单及 `configs/dataset_filter.yaml`，不能直接枚举联接目录中的全部图片。
+`blade-v3-grouped-202608` 是当前正式的 15 类无泄漏版本。它在旧版冻结样本基础上按图片哈希、
+拍摄序列和类别覆盖进行确定性分组，形成 train / val / test 三份互斥清单；共 48,291 张图片、
+48,291 个标签文件和 49,471 个实例，15 个细类与 6 个粗类在三个 split 中均有覆盖。
 
-131张hard error图片已经逐图复核，全部记录为 `repair_confirmed`；202个hard行内坐标和
-747个soft坐标只在新标签中重置到 `[0,1]`。严格校验结果为：49,471个实例，图片完整解码
-失败、缺标签、孤立标签、非法类别、polygon点数异常和越界坐标均为0。
-
-复现、哈希和存储说明见 `docs/dataset_version.md`；完整质量报告见 `docs/dataset_report.md`。
+正式 seg 使用 `datasets/v3-index-rebuild/blade-v3-grouped-202608/data.yaml`。该清单中的
+`../blade-v2/...` 是位于 `datasets/v3-index-rebuild/` 内部的兼容入口，实际依赖
+`datasets/blade-v2-rebuild-v3-index`，不是旧的顶层 `datasets/blade-v2` 数据集。清理磁盘时
+必须保留这两个 v3 支撑目录。
 
 ```powershell
-# 正式版本统计（必须带同一filter）
-python scripts\analyze_dataset.py `
-  --images datasets\blade-v2\images `
-  --labels datasets\blade-v2\labels `
-  --data datasets\blade-v2\data.yaml `
-  --output results\dataset_v2 `
-  --filter-config configs\dataset_filter.yaml `
-  --workers 16
+# 只读检查数据、环境、训练状态与断点恢复能力
+python scripts/run_v3_baselines.py status
 
-# 6个上级类别分布
-python scripts\analyze_class_hierarchy.py `
-  --dataset datasets\blade-v2 `
-  --hierarchy configs\class_hierarchy.yaml `
-  --output results\hierarchy
+# 租用 Windows/Linux 算力节点开跑前：全量核对环境、CUDA、权重和 train/val 引用
+python scripts/run_v3_score_sweep.py preflight --require-cuda
 
-# train/val泄漏候选扫描
-python scripts\check_split_leakage.py `
-  --dataset datasets\blade-v2 `
-  --output results\dataset_review\split_leakage_review.csv `
-  --workers 16
+# 已封存基线的状态检查（seg 117/200，OBB 82/200）
+python scripts/run_v3_baselines.py run --task seg --device 0
+python scripts/run_v3_baselines.py run --task obb --device 0
+
+# 顺序处理两项：完成项跳过，中断项从 last.pt 恢复
+python scripts/run_v3_baselines.py run --task all --device 0
+
+# 平台期主动停止；进程已停则用 seal 封存并关闭自动恢复
+python scripts/run_v3_baselines.py stop --task seg --reason "validation plateau"
+python scripts/run_v3_baselines.py seal --task seg --reason "validation plateau"
+
+# 补生成 YOLO 原生曲线；完整 PR/F1/混淆矩阵需去掉 --training-only 并指定 GPU
+python scripts/run_v3_baselines.py plots --task seg --training-only
+
+# 平台期后的提分实验：先看计划，再按 stage 1 顺序执行，完成后自动汇总
+python scripts/run_v3_score_sweep.py plan --stage all
+python scripts/run_v3_score_sweep.py run --task all --stage 1 --device 0
+python scripts/run_v3_score_sweep.py analyze
 ```
+
+当前同口径从头训练的建议预算为 seg 110 epochs、OBB 90 epochs；200 仅是已封存
+基线的历史预算上限。提分实验统一从各自 `best.pt` 开新目录，优先比较低学习率
+AdamW/cosine 与 1280 小目标方案，不继续恢复平台期基线。
+
+Linux/云 GPU 的数据同步、环境安装、多节点拆分和校验命令见
+[`docs/linux_v3_training.md`](docs/linux_v3_training.md)。不要把本机盘符、运行时
+`normalized_data.yaml` 或 Ultralytics cache 复制到另一操作系统。
+
+旧版 v2 仅用于历史实验追溯，不再作为正式训练入口。历史说明仍保留在
+`docs/dataset_version.md` 与旧实验配置中；当前使用者应以 v3 数据卡、统一 runner 文档和
+`configs/v3_baselines.yaml` 为准。
 
 推理命令同时兼容原有的 `--model` 参数。`train`、`predict`、`evaluate` / `eval` 和 `ablation`
 均可使用 `--device auto`、`--device 0` 或 `--device cpu`。

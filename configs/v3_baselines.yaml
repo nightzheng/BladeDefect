@@ -9,8 +9,10 @@ tasks:
     experiment_id: v3_yolo11s_seg_960_e200
     task: segment
     total_epochs: 200
+    recommended_from_scratch_epochs: 110
   obb:
     config: configs/experiments/v3_yolo11s_obb_960_e200.yaml
     experiment_id: v3_yolo11s_obb_960_e200
     task: obb
     total_epochs: 200
+    recommended_from_scratch_epochs: 90

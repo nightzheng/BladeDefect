@@ -1,4 +1,4 @@
-"""运行正式 v3 OBB baseline（YOLO11s-obb@960，50 epochs）并导出统一口径工件。
+"""运行正式 v3 OBB baseline（YOLO11s-obb@960）并导出统一口径工件。
 
 特性：
 - 训练前 OBB 数据门禁（仅 train/val，声明的 test 永不加载）；
@@ -11,13 +11,15 @@
 - --calibrate-only 模式按真实显存与迭代耗时校准 batch 并记录，不进入正式训练。
 
 用法：
-    python scripts/run_v3_obb_baseline.py --config configs/experiments/v3_yolo11s_obb_960_e50.yaml
-    python scripts/run_v3_obb_baseline.py --config configs/experiments/v3_yolo11s_obb_960_e50.yaml --calibrate-only --calibrate-batch 8
+    python scripts/run_v3_obb_baseline.py --config configs/experiments/v3_yolo11s_obb_960_e200.yaml
+    python scripts/run_v3_obb_baseline.py --config configs/experiments/v3_yolo11s_obb_960_e200.yaml --calibrate-only --calibrate-batch 8
 """
 from __future__ import annotations
 
 import argparse
 import json
+import os
+import subprocess
 import sys
 import time
 from datetime import datetime, timezone
@@ -46,6 +48,7 @@ from blade_defect.experiment.runner import (
 from blade_defect.utils.device import resolve_device
 from blade_defect.utils.files import load_project_config, load_yaml, save_json
 from blade_defect.utils.paths import posix_path, resolve_model_reference, resolve_path, user_path
+from scripts.cache_dataset_validation import run_cached_validation
 from scripts.run_obb_smoke import acquire_official_weight, validate_smoke_dataset
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -53,10 +56,16 @@ DEFAULT_PROVENANCE = Path("results/obb_v3/weight_provenance.json")
 CALIBRATION_REPORT = Path("results/obb_v3/batch_calibration.json")
 # 校准允许的最高显存占用比例（含上下文开销的安全余量）。
 CALIBRATION_MEMORY_BUDGET = 0.92
+FORMAL_GATE_CACHE = Path("results/data_gate_cache/obb_train_val_validation_cache.json")
+LEGACY_FULL_VALIDATION_REPORT = Path("results/obb_v3/validation_report.json")
 
 PASSTHROUGH_CONFIG_KEYS = {
     "epochs", "imgsz", "batch", "device", "workers", "seed", "pretrained",
     "cache", "amp", "val", "save", "save_period", "exist_ok", "patience",
+    "optimizer", "lr0", "lrf", "cos_lr", "warmup_epochs", "weight_decay",
+    "mosaic", "mixup", "copy_paste", "close_mosaic", "degrees", "translate",
+    "scale", "shear", "perspective", "fliplr", "flipud", "hsv_h", "hsv_s",
+    "hsv_v",
 }
 NON_TRAINING_KEYS = {
     "model", "notes", "label_level", "task", "name", "project",
@@ -124,6 +133,13 @@ def _select_representative_val_images(
 
 
 def _load_yolo():
+    # Linux batch nodes may have a read-only or ephemeral HOME. Keep Ultralytics
+    # settings inside the checkout unless the operator explicitly chose another
+    # YOLO_CONFIG_DIR; this matches the segmentation wrapper's behavior.
+    if "YOLO_CONFIG_DIR" not in os.environ:
+        config_root = PROJECT_ROOT / "runs" / ".ultralytics-config"
+        (config_root / "Ultralytics").mkdir(parents=True, exist_ok=True)
+        os.environ["YOLO_CONFIG_DIR"] = str(config_root)
     try:
         from ultralytics import YOLO
     except ImportError as exc:
@@ -138,8 +154,6 @@ def _materialize_absolute_data_yaml(data_path: Path, output: Path) -> Path:
     这里与 seg 正式实验的 resolved_data_yaml 同一策略：path 绝对化、train/val
     清单条目绝对化。训练可见 yaml 不含 test 键（test 锁定，训练永不加载）。
     """
-    import os
-
     import yaml
 
     payload = load_yaml(data_path)
@@ -152,7 +166,7 @@ def _materialize_absolute_data_yaml(data_path: Path, output: Path) -> Path:
         if not isinstance(entry, str) or not entry.lower().endswith(".txt"):
             continue
         list_path = resolve_path(entry, dataset_root)
-        lines: list[str] = []
+        image_paths: list[Path] = []
         for raw_line in list_path.read_text(encoding="utf-8-sig").splitlines():
             item = raw_line.strip()
             if not item:
@@ -160,7 +174,67 @@ def _materialize_absolute_data_yaml(data_path: Path, output: Path) -> Path:
             item_path = user_path(item)
             if not item_path.is_absolute():
                 item_path = Path(os.path.abspath(os.fspath(list_path.parent / item_path)))
-            lines.append(posix_path(item_path))
+            image_paths.append(item_path)
+
+        # Ultralytics stores its label cache next to the first label directory.
+        # This dataset's train and val indexes both point into images/train, so
+        # without distinct path aliases they continually overwrite one shared
+        # labels/train.cache and force a 33k-image rescan on the next launch.
+        # Directory links give each split its own cache path without duplicating
+        # any image or label data. Fall back to the original paths on platforms
+        # where directory links are unavailable.
+        lines = [posix_path(path) for path in image_paths]
+        if image_paths:
+            from blade_defect.data.indexed_splits import label_path_for_image
+
+            label_paths = [label_path_for_image(path) for path in image_paths]
+            parent_pairs = sorted(
+                {(image.parent, label.parent) for image, label in zip(image_paths, label_paths)},
+                key=lambda pair: (str(pair[0]), str(pair[1])),
+            )
+            view_root = output.parent / "ultralytics_cache_views" / split
+            pair_aliases = {
+                pair: f"p{index:03d}_{pair[0].name}"
+                for index, pair in enumerate(parent_pairs)
+            }
+            links_ok = True
+            for pair, alias in pair_aliases.items():
+                for kind, target in (("images", pair[0]), ("labels", pair[1])):
+                    link = view_root / kind / alias
+                    link.parent.mkdir(parents=True, exist_ok=True)
+                    try:
+                        if link.exists():
+                            links_ok = link.resolve() == target.resolve()
+                        else:
+                            try:
+                                link.symlink_to(target.resolve(), target_is_directory=True)
+                            except OSError:
+                                if os.name != "nt":
+                                    raise
+                                created = subprocess.run(
+                                    ["cmd", "/c", "mklink", "/J", str(link), str(target.resolve())],
+                                    capture_output=True,
+                                    text=True,
+                                    check=False,
+                                )
+                                if created.returncode != 0:
+                                    raise OSError(created.stderr or created.stdout)
+                    except OSError:
+                        links_ok = False
+                    if not links_ok:
+                        break
+                if not links_ok:
+                    break
+            if links_ok:
+                lines = [
+                    posix_path(
+                        view_root
+                        / "images"
+                        / pair_aliases[(image.parent, label.parent)]
+                        / image.name
+                    )
+                    for image, label in zip(image_paths, label_paths)
+                ]
         absolute_list = output.with_name(f"{output.stem}.{split}.txt")
         absolute_list.write_text("\n".join(lines) + "\n", encoding="utf-8", newline="\n")
         payload[split] = posix_path(absolute_list)
@@ -296,13 +370,46 @@ def run_obb_baseline(
         config_file, path_fields=("data", "project", "weight_provenance")
     )
     data_path = resolve_path(train_config["data"], project_root)
-    name = run_name or str(train_config.get("name", "v3_yolo11s_obb_960_e50"))
+    name = run_name or str(train_config.get("name", "v3_yolo11s_obb_960_e200"))
     if epochs is not None:
         train_config["epochs"] = epochs
     if device is not None:
         train_config["device"] = device
 
-    validation_info, val_images = validate_smoke_dataset(data_path)
+    # 正式数据有四万余张 train/val 图片。旧门禁每次启动都逐张 OpenCV 解码，
+    # 在机械盘上会阻塞半小时以上。缓存门禁仍会每次全量检查索引、路径和标签，
+    # 仅复用未变化图片的解码结果；图片元信息变化时只复检对应样本。
+    dataset_root = data_path.parent
+    gate_payload = run_cached_validation(
+        dataset_root,
+        cache_path=resolve_path(FORMAL_GATE_CACHE, project_root),
+        splits=("train", "val"),
+        bootstrap_report=resolve_path(LEGACY_FULL_VALIDATION_REPORT, project_root),
+    )
+    if not gate_payload["valid"]:
+        raise RuntimeError(
+            "OBB dataset validation failed: "
+            + "; ".join(
+                f"{split}={report['error_type_counts']}"
+                for split, report in gate_payload["splits"].items()
+                if not report["valid"]
+            )
+        )
+    from blade_defect.data import load_indexed_splits
+
+    indexed = load_indexed_splits(data_path, ("val",))
+    val_images = [sample.image_path for sample in indexed["val"]]
+    validation_info = {
+        "valid": True,
+        "mode": "indexed_cached",
+        "validated_splits": ["train", "val"],
+        "test_used": False,
+        "train_samples": gate_payload["splits"]["train"]["images"],
+        "val_samples": gate_payload["splits"]["val"]["images"],
+        "train_instances": gate_payload["splits"]["train"]["valid_instances"],
+        "val_instances": gate_payload["splits"]["val"]["valid_instances"],
+        "cache": gate_payload["cache"],
+    }
     dataset_metadata = collect_dataset_metadata(data_path)
     dataset_manifest = dataset_metadata.get("manifest") or {}
     code_commit = _git_commit(project_root)
@@ -378,6 +485,7 @@ def run_obb_baseline(
         "continuation": continuation,
         "test_used": False,
         "validated_splits": validation_info.get("validated_splits", ["train", "val"]),
+        "dataset_gate": validation_info.get("cache"),
     }
     save_json(manifest, manifest_path)
 
@@ -400,6 +508,13 @@ def run_obb_baseline(
     if train_fn is None:
         YOLO = _load_yolo()
         model = YOLO(str(model_source))
+        stop_request_path = run_dir / "stop_request.json"
+
+        def _stop_after_completed_epoch(ultralytics_trainer) -> None:
+            if stop_request_path.is_file():
+                ultralytics_trainer.stop = True
+
+        model.add_callback("on_train_epoch_end", _stop_after_completed_epoch)
         train_callable = model.train
     else:
         train_callable = train_fn
@@ -421,6 +536,16 @@ def run_obb_baseline(
             "train_seconds": round(train_seconds, 1),
         }
     )
+    stop_request_path = run_dir / "stop_request.json"
+    if stop_request_path.is_file():
+        manifest.update(
+            {
+                "termination": "manual_early_stop",
+                "stop_request": json.loads(stop_request_path.read_text(encoding="utf-8-sig")),
+                "training_closed": True,
+                "resume_supported": False,
+            }
+        )
     save_json(manifest, manifest_path)
 
     try:
@@ -439,6 +564,10 @@ def run_obb_baseline(
             imgsz=imgsz,
             device=resolved_device,
             workers=int(train_config.get("workers", 4)),
+            plots=True,
+            project=str(run_dir),
+            name="yolo_analysis_val",
+            exist_ok=True,
         )
         box = _box_metrics(raw_result)
         record: dict[str, Any] = {

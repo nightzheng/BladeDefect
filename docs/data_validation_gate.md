@@ -4,7 +4,7 @@
 
 正式 v3 / OBB 派生数据（blade-v3-grouped-obb，48,291 张索引图片）的全量门禁
 `check_obb_indexed_samples` 对每张图片执行 OpenCV 解码校验，单次约 40—50 分钟纯 CPU；
-smoke、batch 校准、50/100 轮 baseline 每次启动都会重复触发，属无效等待。
+smoke、batch 校准、历史 50/100 轮及当前 200 轮 baseline 每次启动都会重复触发，属无效等待。
 本轮为全量图像解码门禁引入可审计缓存，**不降低校验强度、不改为全面抽样**。
 
 ## 缓存键（三者缺一不可）

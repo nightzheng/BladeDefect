@@ -7,11 +7,14 @@ Ultralytics resume 语义恢复优化器、调度器和当前 epoch。
 from __future__ import annotations
 
 import argparse
+import csv
 import hashlib
 import importlib.metadata
 import json
+import os
 import re
 import sys
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -20,7 +23,7 @@ import yaml
 if __package__ in {None, ""}:
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from blade_defect.utils.files import load_project_config, load_yaml
+from blade_defect.utils.files import load_project_config, load_yaml, save_json
 from blade_defect.utils.paths import resolve_path
 from scripts.run_full_primary import run_primary
 from scripts.run_v3_obb_baseline import run_obb_baseline
@@ -106,13 +109,18 @@ def task_status(suite: dict[str, Any], project_root: Path, task: str) -> dict[st
     return {
         "task": task,
         "experiment_id": context["profile"]["experiment_id"],
+        "budget_epochs": context["profile"].get("total_epochs"),
+        "recommended_from_scratch_epochs": context["profile"].get(
+            "recommended_from_scratch_epochs"
+        ),
         "config": str(context["config_path"]),
         "data": str(data_path),
         "data_available": data_path.is_file(),
         "run_dir": str(run_dir),
         "status": manifest.get("status", "not_started"),
         "last_checkpoint": str(last_pt) if last_pt.is_file() else None,
-        "resumable": last_pt.is_file() and manifest.get("status") not in {"ok", "completed"},
+        "resumable": last_pt.is_file()
+        and manifest.get("status") not in {"ok", "completed", "stopped_early"},
     }
 
 
@@ -150,7 +158,7 @@ def run_base(
 ) -> dict[str, Any]:
     context = _profile_context(suite, project_root, task)
     manifest = _read_json(context["run_dir"] / "run_manifest.json")
-    if manifest.get("status") in {"ok", "completed"}:
+    if manifest.get("status") in {"ok", "completed", "stopped_early"}:
         return {"task": task, "status": "skipped_completed", "run_dir": str(context["run_dir"])}
     total = int(context["profile"]["total_epochs"])
     lineage = {
@@ -165,6 +173,212 @@ def run_base(
         context, epochs=None, run_name=None, device=device,
         initial_checkpoint=None, continuation=lineage,
     )
+
+
+def _training_rows(run_dir: Path) -> list[dict[str, str]]:
+    path = run_dir / "results.csv"
+    if not path.is_file():
+        return []
+    with path.open(encoding="utf-8-sig", newline="") as handle:
+        return list(csv.DictReader(handle))
+
+
+def request_stop(
+    suite: dict[str, Any], project_root: Path, task: str, *, reason: str
+) -> dict[str, Any]:
+    """Request a graceful stop after the current epoch has been validated/saved."""
+    context = _profile_context(suite, project_root, task)
+    run_dir = context["run_dir"]
+    manifest_path = run_dir / "run_manifest.json"
+    manifest = _read_json(manifest_path)
+    if not manifest:
+        raise FileNotFoundError(f"运行尚未开始：{run_dir}")
+    if manifest.get("status") in {"ok", "completed", "stopped_early"}:
+        return {"task": task, "status": manifest.get("status"), "run_dir": str(run_dir)}
+    requested_at = datetime.now().astimezone().isoformat(timespec="seconds")
+    request = {
+        "task": task,
+        "reason": reason,
+        "requested_at": requested_at,
+        "policy": "finish_current_epoch_then_validate_and_save",
+    }
+    save_json(request, run_dir / "stop_request.json")
+    manifest.update({"status": "stop_requested", "stop_request": request})
+    save_json(manifest, manifest_path)
+    return {"task": task, "status": "stop_requested", "run_dir": str(run_dir), **request}
+
+
+def seal_early_stop(
+    suite: dict[str, Any], project_root: Path, task: str, *, reason: str
+) -> dict[str, Any]:
+    """Close an already stopped run and make it terminal without resuming training."""
+    context = _profile_context(suite, project_root, task)
+    run_dir = context["run_dir"]
+    manifest_path = run_dir / "run_manifest.json"
+    manifest = _read_json(manifest_path)
+    rows = _training_rows(run_dir)
+    last_pt = run_dir / "weights" / "last.pt"
+    best_pt = run_dir / "weights" / "best.pt"
+    if not manifest or not rows or not last_pt.is_file():
+        raise RuntimeError(f"缺少 manifest、results.csv 或 last.pt，不能封存：{run_dir}")
+
+    metric = "metrics/mAP50-95(M)" if task == "seg" else "metrics/mAP50-95(B)"
+    available = [row for row in rows if row.get(metric) not in {None, ""}]
+    best_row = max(available, key=lambda row: float(row[metric])) if available else rows[-1]
+    last_row = rows[-1]
+    summary = {
+        "experiment_id": context["profile"]["experiment_id"],
+        "task": task,
+        "status": "stopped_early",
+        "reason": reason,
+        "completed_epochs": int(float(last_row["epoch"])),
+        "configured_epochs": int(context["profile"]["total_epochs"]),
+        "selection_metric": metric,
+        "best_epoch": int(float(best_row["epoch"])),
+        "best_metric": float(best_row[metric]) if best_row.get(metric) else None,
+        "last_metric": float(last_row[metric]) if last_row.get(metric) else None,
+        "best_checkpoint": str(best_pt) if best_pt.is_file() else None,
+        "last_checkpoint": str(last_pt),
+        "test_used": False,
+        "sealed_at": datetime.now().astimezone().isoformat(timespec="seconds"),
+    }
+    save_json(summary, run_dir / "early_stop_summary.json")
+    manifest.update(
+        {
+            "status": "stopped_early",
+            "finished_at": summary["sealed_at"],
+            "resume_supported": False,
+            "training_closed": True,
+            "early_stop": summary,
+        }
+    )
+    save_json(manifest, manifest_path)
+    return {"run_dir": str(run_dir), "summary": summary, "manifest": str(manifest_path)}
+
+
+def generate_yolo_plots(
+    suite: dict[str, Any],
+    project_root: Path,
+    task: str,
+    *,
+    device: str | None = None,
+    training_only: bool = False,
+) -> dict[str, Any]:
+    """Backfill native Ultralytics plots for a completed or sealed run."""
+    context = _profile_context(suite, project_root, task)
+    run_dir = context["run_dir"]
+    results_csv = run_dir / "results.csv"
+    best_pt = run_dir / "weights" / "best.pt"
+    if not results_csv.is_file():
+        raise FileNotFoundError(f"缺少 results.csv：{results_csv}")
+
+    os.environ.setdefault("YOLO_CONFIG_DIR", str(project_root / "results" / "ultralytics_config"))
+    from ultralytics.utils.plotting import plot_results
+
+    plot_results(file=str(results_csv))
+    artifacts = {"training_curves": str(run_dir / "results.png")}
+    if training_only:
+        payload = {
+            "run_dir": str(run_dir),
+            "validation_ran": False,
+            "test_used": False,
+            "artifacts": artifacts,
+        }
+        save_json(payload, run_dir / "yolo_plot_manifest.json")
+        return payload
+    if not best_pt.is_file():
+        raise FileNotFoundError(f"缺少 best.pt：{best_pt}")
+
+    train_config = context["train_config"]
+    data_path = Path(train_config["data"])
+    analysis_name = "yolo_analysis_val"
+    common = {
+        "imgsz": int(train_config.get("imgsz", 960)),
+        "device": device if device is not None else train_config.get("device", "auto"),
+        "plots": True,
+        "project": str(run_dir),
+        "name": analysis_name,
+        "exist_ok": True,
+        "split": "val",
+    }
+    if task == "seg":
+        from blade_defect.evaluation import (
+            extended_metrics_from_ultralytics,
+            per_class_metrics_from_ultralytics,
+        )
+        from blade_defect.experiment.runner import _fps_from_result, _write_per_class_metrics
+        from blade_defect.models import SegmentationTrainer
+
+        raw_result = SegmentationTrainer(best_pt).validate(
+            data_path, normalize_data_yaml=True, **common
+        )
+        metrics = {
+            "task": "segment",
+            "checkpoint": str(best_pt),
+            **extended_metrics_from_ultralytics(raw_result),
+            "fps": _fps_from_result(raw_result),
+        }
+    else:
+        from blade_defect.evaluation import per_class_metrics_from_ultralytics
+        from blade_defect.experiment.runner import _fps_from_result, _write_per_class_metrics
+        from scripts.run_v3_obb_baseline import (
+            _box_metrics,
+            _load_yolo,
+            _materialize_absolute_data_yaml,
+        )
+
+        # OBB 发布清单使用可移植的 ``path: .``。Ultralytics 独立验证时会
+        # 按当前工作目录解析它，因此复用正式训练的绝对化清单，避免把
+        # val.txt 错误解析到仓库根目录。
+        normalized_data = _materialize_absolute_data_yaml(
+            data_path, run_dir / "normalized_data.yaml"
+        )
+        raw_result = _load_yolo()(str(best_pt)).val(
+            data=str(normalized_data), task="obb", **common
+        )
+        metrics = {
+            "task": "obb",
+            "checkpoint": str(best_pt),
+            **_box_metrics(raw_result),
+            "fps": _fps_from_result(raw_result),
+        }
+    save_json(metrics, run_dir / "yolo_analysis_metrics.json")
+    _write_per_class_metrics(
+        per_class_metrics_from_ultralytics(raw_result),
+        run_dir / "yolo_analysis_per_class_metrics.csv",
+    )
+    analysis_dir = run_dir / analysis_name
+    for name in (
+        "PR_curve.png",
+        "F1_curve.png",
+        "P_curve.png",
+        "R_curve.png",
+        "BoxPR_curve.png",
+        "BoxF1_curve.png",
+        "BoxP_curve.png",
+        "BoxR_curve.png",
+        "MaskPR_curve.png",
+        "MaskF1_curve.png",
+        "MaskP_curve.png",
+        "MaskR_curve.png",
+        "confusion_matrix.png",
+        "confusion_matrix_normalized.png",
+    ):
+        candidate = analysis_dir / name
+        if candidate.is_file():
+            artifacts[name.removesuffix(".png")] = str(candidate)
+    payload = {
+        "run_dir": str(run_dir),
+        "validation_ran": True,
+        "validation_split": "val",
+        "checkpoint": str(best_pt),
+        "test_used": False,
+        "metrics": str(run_dir / "yolo_analysis_metrics.json"),
+        "per_class_metrics": str(run_dir / "yolo_analysis_per_class_metrics.csv"),
+        "artifacts": artifacts,
+    }
+    save_json(payload, run_dir / "yolo_plot_manifest.json")
+    return payload
 
 
 def _completed_candidates(context: dict[str, Any]) -> list[tuple[int, int, Path, dict[str, Any]]]:
@@ -270,6 +484,18 @@ def main() -> None:
     extend_parser.add_argument("--weights", choices=("best", "last"), default="best")
     extend_parser.add_argument("--from-run", type=Path, default=None)
     extend_parser.add_argument("--device", default=None)
+    stop_parser = subparsers.add_parser("stop", help="请求在当前 epoch 保存和验证后停止")
+    stop_parser.add_argument("--task", choices=("seg", "obb"), required=True)
+    stop_parser.add_argument("--reason", default="manual_plateau_stop")
+    seal_parser = subparsers.add_parser("seal", help="封存已停止的部分训练并禁止自动恢复")
+    seal_parser.add_argument("--task", choices=("seg", "obb"), required=True)
+    seal_parser.add_argument("--reason", default="manual_plateau_stop")
+    plots_parser = subparsers.add_parser("plots", help="补生成 Ultralytics 原生训练/验证图")
+    plots_parser.add_argument("--task", choices=("seg", "obb"), required=True)
+    plots_parser.add_argument("--device", default=None)
+    plots_parser.add_argument(
+        "--training-only", action="store_true", help="只从 results.csv 生成 results.png，不运行 val"
+    )
     args = parser.parse_args()
 
     suite, project_root = load_suite(args.suite)
@@ -284,6 +510,18 @@ def main() -> None:
         if args.command == "run":
             tasks = ("seg", "obb") if args.task == "all" else (args.task,)
             payload = {"runs": [run_base(suite, project_root, task, device=args.device) for task in tasks]}
+        elif args.command == "stop":
+            payload = request_stop(suite, project_root, args.task, reason=args.reason)
+        elif args.command == "seal":
+            payload = seal_early_stop(suite, project_root, args.task, reason=args.reason)
+        elif args.command == "plots":
+            payload = generate_yolo_plots(
+                suite,
+                project_root,
+                args.task,
+                device=args.device,
+                training_only=args.training_only,
+            )
         else:
             payload = extend(
                 suite, project_root, args.task, add_epochs=args.add_epochs,

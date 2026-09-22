@@ -9,6 +9,11 @@
 - test 保持锁定：仅参与转换与数据完整性校验，不用于训练、验证、best epoch、阈值选择或预测样例选择；本周不运行任何 test 评估。
 - smoke（1 epoch）与正式 baseline（200 epochs）分开标记，smoke 指标不得冒充正式结果。
 
+当前状态（2026-09-22）：正式运行目录为 `v3_yolo11s_obb_960_e200`，200 epochs 是
+预算上限；该运行已在 82/200 主动封存，最佳 e81，Box mAP50-95=0.17340。
+最后 10 轮相对前 10 轮均值仅 +0.00124，最后 5 轮仅 +0.00098，验证损失也基本
+持平，因此判断主收敛区间为 e70–e82，未来同口径从头训练建议 90 epochs。
+
 ## 数据身份
 
 | 项 | 值 |
@@ -75,7 +80,7 @@ python scripts/compare_obb_seg_common_metrics.py `
 |---|---|---|
 | task / model | obb / yolo11s-obb.pt | obb / yolo11s-obb.pt |
 | imgsz | 960 | 960 |
-| epochs | 1 | 200（`patience=0`，禁用早停） |
+| epochs | 1 | 历史预算上限 200；实际 e82 封存，未来建议 90 + `patience=15–20` |
 | batch | 4（继承负责人既有 smoke 配置） | 8（按真实显存探针校准，见 `results/obb_v3/batch_calibration.json`） |
 | workers | 2 | 4 |
 | device / seed | 0 / 42 | 0 / 42 |
@@ -95,8 +100,8 @@ python scripts/compare_obb_seg_common_metrics.py `
 - `predictions/`：按类别覆盖选取的代表性 val 预测图；
 - `weights/`：best.pt、last.pt、每 5 轮 checkpoint。
 
-中断恢复：重新执行第 6 步命令即可（检测到 `weights/last.pt` 自动 `resume=True`）；
-已完成 run（status=ok）需显式 `--force` 才会重跑，防止静默覆盖。
+该基线已标记 `stopped_early` 且关闭自动恢复；重新执行第 6 步会安全跳过。提分实验使用
+`scripts/run_v3_score_sweep.py` 从 e81 `best.pt` 新建独立目录，不覆盖该基线。
 
 ## 结果归档（交付分析负责人）
 

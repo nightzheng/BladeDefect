@@ -6,6 +6,8 @@ import yaml
 from scripts.run_v3_baselines import (
     load_suite,
     plan_extension,
+    request_stop,
+    seal_early_stop,
     task_status,
     version_report,
 )
@@ -125,6 +127,35 @@ def test_version_report_is_structured(tmp_path: Path) -> None:
     report = version_report(suite)
     assert set(report["checks"]) == {"python", "ultralytics"}
     assert all("required" in item and "installed" in item for item in report["checks"].values())
+
+
+def test_stop_request_and_seal_make_partial_run_terminal(tmp_path: Path) -> None:
+    suite, root = load_suite(_suite(tmp_path))
+    run_dir = tmp_path / "runs" / "v3_yolo11s_seg_960_e100"
+    weights = run_dir / "weights"
+    weights.mkdir(parents=True)
+    (weights / "best.pt").write_bytes(b"best")
+    (weights / "last.pt").write_bytes(b"last")
+    (run_dir / "run_manifest.json").write_text(
+        json.dumps({"status": "running", "resume_supported": True}), encoding="utf-8"
+    )
+    (run_dir / "results.csv").write_text(
+        "epoch,metrics/mAP50-95(M)\n1,0.10\n2,0.14\n3,0.13\n", encoding="utf-8"
+    )
+
+    requested = request_stop(suite, root, "seg", reason="plateau")
+    assert requested["status"] == "stop_requested"
+    assert (run_dir / "stop_request.json").is_file()
+
+    sealed = seal_early_stop(suite, root, "seg", reason="plateau")
+    assert sealed["summary"]["completed_epochs"] == 3
+    assert sealed["summary"]["best_epoch"] == 2
+    assert sealed["summary"]["best_metric"] == 0.14
+    manifest = json.loads((run_dir / "run_manifest.json").read_text(encoding="utf-8"))
+    assert manifest["status"] == "stopped_early"
+    assert manifest["training_closed"] is True
+    assert manifest["resume_supported"] is False
+    assert task_status(suite, root, "seg")["resumable"] is False
 
 
 def test_v3_environment_and_docs_do_not_pin_a_local_conda_path() -> None:

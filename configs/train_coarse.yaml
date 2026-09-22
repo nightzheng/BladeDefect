@@ -1,6 +1,6 @@
 ﻿project_root: ..
 model: yolo11s-seg.pt
-data: D:\视觉缺陷\BladeDefect-main\datasets\blade-v2-6class\data.yaml
+data: datasets/blade-v2-6class/data.yaml
 epochs: 50
 imgsz: 960
 batch: 8

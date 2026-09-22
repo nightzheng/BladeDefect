@@ -86,6 +86,74 @@ def test_cache_hit_skips_decode_and_reproduces_report(tmp_path: Path) -> None:
     assert hit["valid"] == cold["valid"]
 
 
+def test_bootstrap_from_unchanged_full_report_skips_first_decode(
+    tmp_path: Path, monkeypatch
+) -> None:
+    dataset = _build_dataset(tmp_path)
+    cache = tmp_path / "cache.json"
+    initial = run_cached_validation(dataset, cache_path=tmp_path / "initial-cache.json")
+    report = tmp_path / "legacy-validation-report.json"
+    report.write_text(
+        json.dumps(
+            {
+                "mode": "indexed",
+                "valid": True,
+                "splits": initial["splits"],
+                "split_consistency": initial["split_consistency"],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    calls = []
+    monkeypatch.setattr(
+        cache_gate,
+        "is_image_decodable",
+        lambda path: calls.append(path) or True,
+    )
+    payload = run_cached_validation(
+        dataset, cache_path=cache, bootstrap_report=report
+    )
+
+    assert payload["cache"]["decision"] == "bootstrap"
+    assert payload["cache"]["decoded_images"] == 0
+    assert payload["cache"]["bootstrapped_decode_results"] == 12
+    assert payload["cache"]["reused_decode_results"] == 12
+    assert calls == []
+    assert cache.is_file()
+
+
+def test_bootstrap_rejected_when_an_image_is_newer_than_report(
+    tmp_path: Path,
+) -> None:
+    dataset = _build_dataset(tmp_path)
+    initial = run_cached_validation(dataset, cache_path=tmp_path / "initial-cache.json")
+    report = tmp_path / "legacy-validation-report.json"
+    report.write_text(
+        json.dumps(
+            {
+                "mode": "indexed",
+                "valid": True,
+                "splits": initial["splits"],
+                "split_consistency": initial["split_consistency"],
+            }
+        ),
+        encoding="utf-8",
+    )
+    victim = dataset / "images" / "train" / "train_0.png"
+    stat = victim.stat()
+    import os
+
+    os.utime(victim, ns=(stat.st_atime_ns, report.stat().st_mtime_ns + 1_000_000_000))
+    payload = run_cached_validation(
+        dataset,
+        cache_path=tmp_path / "cache.json",
+        bootstrap_report=report,
+    )
+    assert payload["cache"]["decision"] == "cold"
+    assert payload["cache"]["decoded_images"] == 12
+
+
 def test_modified_image_triggers_targeted_recheck(tmp_path: Path) -> None:
     dataset = _build_dataset(tmp_path)
     cache = tmp_path / "cache.json"

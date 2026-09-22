@@ -53,6 +53,8 @@ python -m pip install -e .
 
 如果服务器使用模块系统，应先按管理员说明加载 CUDA/驱动相关模块，再激活 Conda 环境。训练任务
 提交到调度系统时，也应在作业脚本中显式执行 `conda activate bladedefect`。
+v3 封存基线与参数实验迁移到付费节点前，还应按
+[`linux_v3_training.md`](linux_v3_training.md) 同步数据并执行全量 `preflight --require-cuda`。
 
 ## PyTorch 与 CUDA
 

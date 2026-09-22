@@ -2,7 +2,9 @@
 
 > 文档定位：本文件是 OBB 主交接入口。早期盘点与阻塞分析保留用于追溯；当前可执行状态以文末“当前交接状态”为准。抽样激活的详细证据见 `obb_sample_activation_handoff.md`。
 
-本文描述当前代码实际支持的 OBB 执行链路，以及激活 `blade-v3-obb` 前必须补齐的接口。所有命令均从仓库根目录 `D:\Program\BladeDefect` 执行。
+本文描述当前代码实际支持的 OBB 执行链路，以及激活 `blade-v3-obb` 前必须补齐的接口。
+所有命令均从当前机器的仓库根目录执行；历史 Windows 路径不属于运行配置，Linux 节点可放在
+任意可写目录。
 
 ## 1. 目标链路
 
@@ -227,7 +229,7 @@ git diff -- scripts/convert_seg_to_obb.py `
 
 ## 当前交接状态
 
-截至 2026-08-10：
+以下为 **2026-08-10 历史快照**，不再代表当前运行状态：
 
 - v3 索引型数据入口：已完成
 - v3 分层抽样转换：已完成
@@ -236,7 +238,7 @@ git diff -- scripts/convert_seg_to_obb.py `
 - 核心 OBB 算法：未修改
 - 官方 yolo11s-obb.pt：尚未取得可信缓存
 - 1 epoch smoke：BLOCKED
-- 50 epochs baseline：NOT STARTED
+- 历史 50 epochs baseline：当时 NOT STARTED；当前 e200 预算上限运行已在 e82 封存
 
 后续执行者无需重新实现转换算法。
 
@@ -244,4 +246,5 @@ git diff -- scripts/convert_seg_to_obb.py `
 1. 获取并核验官方 yolo11s-obb.pt；
 2. 执行 1 epoch smoke；
 3. smoke 验收通过后生成完整 v3 OBB 派生数据；
-4. 启动正式 50 epochs baseline。
+4. （已完成）正式训练使用 `python scripts/run_v3_baselines.py run --task obb --device 0`，
+   预算上限 200 epochs，实际最佳 e81、e82 封存；未来建议预算 90 epochs。

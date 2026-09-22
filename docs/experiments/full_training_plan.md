@@ -1,5 +1,8 @@
 # 全量训练计划（full training plan）
 
+> 历史 v2 计划：本页的 50/100 epochs 结论用于旧采样与旧全量实验追溯，不是当前
+> v3 seg/OBB 的训练计划。当前口径见 `v3_training_plan.md` 与 `v3_unified_runner.md`。
+
 ## 1. 数据版本
 
 | 用途 | dataset_id | 规模 | 说明 |

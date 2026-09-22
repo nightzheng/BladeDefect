@@ -1,0 +1,131 @@
+schema_version: 1
+project_root: ..
+output_dir: results/v3_score_sweep
+
+# e200 是已封存基线的历史预算标识，不再作为新实验的默认轮数。
+# recommended_from_scratch_epochs 用于未来同口径重训；下列实验均从已封存 best.pt
+# 开始一个新的短程微调阶段，不恢复旧 optimizer/scheduler。
+tasks:
+  seg:
+    baseline_run: runs/v3_yolo11s_seg_960_e200
+    base_config: configs/experiments/v3_yolo11s_seg_960_e200.yaml
+    primary_metric: mask_mAP50-95
+    recommended_from_scratch_epochs: 110
+    experiments:
+      - id: v3_seg_ft_cos_adamw_960_e30
+        stage: 1
+        hypothesis: 低学习率 AdamW + cosine 在平台后细化边界
+        overrides:
+          epochs: 30
+          imgsz: 960
+          batch: 8
+          optimizer: AdamW
+          lr0: 0.0005
+          lrf: 0.01
+          cos_lr: true
+          warmup_epochs: 2
+          weight_decay: 0.0005
+          close_mosaic: 10
+          patience: 10
+      - id: v3_seg_ft_smallobj_1280_e25
+        stage: 1
+        hypothesis: 1280 输入配合适度 copy-paste/mosaic 提升小目标召回
+        overrides:
+          epochs: 25
+          imgsz: 1280
+          batch: 4
+          optimizer: AdamW
+          lr0: 0.0003
+          lrf: 0.01
+          cos_lr: true
+          warmup_epochs: 2
+          weight_decay: 0.0005
+          mosaic: 0.7
+          copy_paste: 0.15
+          scale: 0.6
+          close_mosaic: 5
+          patience: 8
+      - id: v3_seg_ft_aug_960_e30
+        stage: 2
+        hypothesis: 保持 960，以更温和的几何与实例增强检验泛化收益
+        overrides:
+          epochs: 30
+          imgsz: 960
+          batch: 8
+          optimizer: AdamW
+          lr0: 0.0004
+          lrf: 0.01
+          cos_lr: true
+          warmup_epochs: 2
+          mosaic: 0.5
+          copy_paste: 0.2
+          degrees: 10
+          scale: 0.5
+          close_mosaic: 10
+          patience: 10
+
+  obb:
+    baseline_run: runs/v3_yolo11s_obb_960_e200
+    base_config: configs/experiments/v3_yolo11s_obb_960_e200.yaml
+    primary_metric: box_mAP50-95
+    recommended_from_scratch_epochs: 90
+    experiments:
+      - id: v3_obb_ft_cos_adamw_960_e30
+        stage: 1
+        hypothesis: 低学习率 AdamW + cosine 在平台后细化旋转框回归
+        overrides:
+          epochs: 30
+          imgsz: 960
+          batch: 8
+          optimizer: AdamW
+          lr0: 0.0005
+          lrf: 0.01
+          cos_lr: true
+          warmup_epochs: 2
+          weight_decay: 0.0005
+          close_mosaic: 10
+          patience: 10
+      - id: v3_obb_ft_smallobj_1280_e25
+        stage: 1
+        hypothesis: 1280 输入优先改善小目标与细长缺陷定位
+        overrides:
+          epochs: 25
+          imgsz: 1280
+          batch: 4
+          optimizer: AdamW
+          lr0: 0.0003
+          lrf: 0.01
+          cos_lr: true
+          warmup_epochs: 2
+          weight_decay: 0.0005
+          mosaic: 0.7
+          scale: 0.6
+          close_mosaic: 5
+          patience: 8
+      - id: v3_obb_ft_rotation_960_e30
+        stage: 2
+        hypothesis: 增加旋转与上下翻转增强，改善方向变化大的缺陷
+        overrides:
+          epochs: 30
+          imgsz: 960
+          batch: 8
+          optimizer: AdamW
+          lr0: 0.0004
+          lrf: 0.01
+          cos_lr: true
+          warmup_epochs: 2
+          degrees: 45
+          translate: 0.1
+          scale: 0.5
+          fliplr: 0.5
+          flipud: 0.5
+          mosaic: 0.7
+          close_mosaic: 10
+          patience: 10
+
+decision_policy:
+  minimum_primary_gain: 0.002
+  maximum_fps_drop_ratio: 0.20
+  maximum_single_class_ap_drop: 0.02
+  stage_2_rule: 仅在同任务 stage 1 至少一个实验达到主指标最小增益后运行
+  final_rule: 自动排名只做筛选；必须复核逐类指标、混淆矩阵和误检漏检样例后定版

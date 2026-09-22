@@ -143,6 +143,15 @@ def run_primary(
         train_kwargs.pop("pretrained", None)
 
     trainer = SegmentationTrainer(model_source)
+    stop_request_path = run_dir / "stop_request.json"
+
+    def _stop_after_completed_epoch(ultralytics_trainer) -> None:
+        if stop_request_path.is_file():
+            ultralytics_trainer.stop = True
+
+    # External `run_v3_baselines.py stop` requests are honored only at an epoch
+    # boundary, after which Ultralytics still performs validation and saves last.pt.
+    trainer.model.add_callback("on_train_epoch_end", _stop_after_completed_epoch)
     try:
         # normalize_data_yaml=True：将 data.yaml 的 path 绝对化后再交给 Ultralytics，
         # 避免相对 path 被解析到 DATASETS_DIR 之外。
@@ -164,6 +173,7 @@ def run_primary(
         raw_result = evaluator.validate(
             data_path, imgsz=imgsz, device=train_config.get("device", "auto"),
             normalize_data_yaml=True, plots=bool(train_config.get("plots", True)),
+            project=str(run_dir), name="yolo_analysis_val", exist_ok=True,
         )
         extended = extended_metrics_from_ultralytics(raw_result)
         record = {
@@ -212,7 +222,21 @@ def run_primary(
         save_json(manifest, manifest_path)
         raise
 
+    stop_request = (
+        json.loads(stop_request_path.read_text(encoding="utf-8-sig"))
+        if stop_request_path.is_file()
+        else None
+    )
     manifest.update({"status": "ok", "finished_at": _now_iso(), "save_dir": str(save_dir)})
+    if stop_request:
+        manifest.update(
+            {
+                "termination": "manual_early_stop",
+                "stop_request": stop_request,
+                "training_closed": True,
+                "resume_supported": False,
+            }
+        )
     save_json(manifest, manifest_path)
     return {"run_dir": str(run_dir), "metrics": record, "manifest": str(manifest_path)}
 

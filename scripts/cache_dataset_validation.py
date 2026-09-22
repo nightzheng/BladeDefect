@@ -151,6 +151,50 @@ def decide_cache(
     return "partial", ["file_state_changed"], recheck
 
 
+def _bootstrap_decode_results(
+    report_path: Path,
+    *,
+    identity_hashes: dict[str, str],
+    states: dict[str, dict[str, Any]],
+    splits: tuple[str, ...],
+) -> dict[str, bool] | None:
+    """Import image-decode results from a still-current full validation report.
+
+    The legacy validator report does not contain per-file fingerprints.  It is
+    therefore accepted only when every requested split has the same identity,
+    was fully valid with no corrupt images, and no indexed image is newer than
+    the report file.  Labels are intentionally not covered by this shortcut:
+    they are parsed in full on every cached validation run below.
+    """
+    try:
+        payload = json.loads(report_path.read_text(encoding="utf-8-sig"))
+        report_mtime_ns = report_path.stat().st_mtime_ns
+    except (OSError, json.JSONDecodeError):
+        return None
+    if payload.get("valid") is not True or payload.get("mode") != "indexed":
+        return None
+    report_splits = payload.get("splits") or {}
+    consistency = payload.get("split_consistency") or {}
+    report_identities = consistency.get("split_identity_sha256") or {}
+    for split in splits:
+        report = report_splits.get(split) or {}
+        split_states = {
+            key: entry for key, entry in states.items() if key.startswith(f"{split}\t")
+        }
+        if (
+            report_identities.get(split) != identity_hashes.get(split)
+            or report.get("valid") is not True
+            or report.get("corrupt_images")
+            or int(report.get("images", -1)) != len(split_states)
+        ):
+            return None
+        for entry in split_states.values():
+            image = entry["image"]
+            if not image["exists"] or int(image["mtime_ns"]) > report_mtime_ns:
+                return None
+    return {key: True for key in states}
+
+
 def _decode_outcomes(
     keys: Iterable[str],
     indexed: dict[str, list[IndexedSample]],
@@ -180,6 +224,7 @@ def run_cached_validation(
     num_classes: int | None = None,
     min_area: float = 1e-8,
     splits: tuple[str, ...] = SPLITS,
+    bootstrap_report: Path | None = None,
 ) -> dict[str, Any]:
     """执行一次带缓存的门禁校验，返回完整负载（含 cache 决策块）。"""
     started = time.perf_counter()
@@ -219,6 +264,24 @@ def run_cached_validation(
             states=states,
         )
 
+    bootstrap_outcomes: dict[str, bool] = {}
+    if (
+        not sampled
+        and use_cache
+        and decision == "cold"
+        and reasons == ["cache_missing"]
+        and bootstrap_report is not None
+    ):
+        bootstrap_outcomes = _bootstrap_decode_results(
+            bootstrap_report,
+            identity_hashes=identity_hashes,
+            states=states,
+            splits=splits,
+        ) or {}
+        if bootstrap_outcomes:
+            decision = "bootstrap"
+            reasons = ["trusted_full_validation_report_and_unchanged_images"]
+
     all_keys = sorted(states)
     existing_image_keys = [key for key in all_keys if states[key]["image"]["exists"]]
     if sampled:
@@ -237,7 +300,7 @@ def run_cached_validation(
     fresh_outcomes = _decode_outcomes(decode_keys, indexed)
     decode_seconds = time.perf_counter() - decode_started
 
-    cached_outcomes: dict[str, bool] = {}
+    cached_outcomes: dict[str, bool] = dict(bootstrap_outcomes)
     if cache is not None and decision in {"hit", "partial"}:
         cached_outcomes = {
             key: bool(value)
@@ -355,6 +418,18 @@ def run_cached_validation(
     label_seconds = time.perf_counter() - label_started
 
     consistency = build_split_consistency(indexed, dataset, splits)
+    if set(splits) != set(SPLITS):
+        # The manifest membership fingerprint covers train+val+test together.
+        # A training-only gate deliberately must not load test, so validate the
+        # requested split identities, disjointness and locked-test policy while
+        # marking the full-membership comparison as out of scope.
+        consistency["scope"] = list(splits)
+        consistency["full_membership_check"] = "not_applicable_for_subset"
+        consistency["valid"] = (
+            all(consistency["parent_equals_derived"].values())
+            and not any(consistency["cross_split_overlap_counts"].values())
+            and consistency["test_data_integrity_only"]
+        )
 
     total_seconds = time.perf_counter() - started
     cache_block = {
@@ -366,6 +441,7 @@ def run_cached_validation(
         "file_state_sha256": file_state_hash,
         "decoded_images": len(fresh_outcomes),
         "reused_decode_results": len(cached_outcomes),
+        "bootstrapped_decode_results": len(bootstrap_outcomes),
         "rechecked_sample_ids": sorted(recheck_keys) if decision == "partial" else [],
         "timing_seconds": {
             "total": round(total_seconds, 3),

@@ -38,4 +38,6 @@ formal v3 train/val/test indexes
 
 当前可以进入“抽样数据上的真实 1 epoch smoke”数据 gate，但不能立即运行：官方 `yolo11s-obb.pt` 仍缺失且 `weight_provenance.json` 为 `verified: false`。取得并验证官方权重后，仍需负责人明确批准再运行；本交接没有启动训练。
 
-本抽样 PASS 不代表全量 OBB 数据已经生成，也不能替代正式全量转换验收或 50 epochs 实验批准。
+本抽样 PASS 是历史激活阶段结论，不代表全量 OBB 数据已经生成，也不能替代正式全量转换验收。
+旧“50 epochs 实验”计划已由 `v3_yolo11s_obb_960_e200` 取代；后者以 200 轮为预算上限，
+实际在 e82 平台期封存（最佳 e81）。未来同口径从头训练建议 90 epochs。

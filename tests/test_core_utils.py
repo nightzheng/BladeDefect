@@ -1,4 +1,4 @@
-from pathlib import Path
+from pathlib import Path, PurePosixPath, PureWindowsPath
 
 import pytest
 import yaml
@@ -108,3 +108,20 @@ def test_runtime_data_yaml_absolutizes_txt_list_entries(tmp_path: Path) -> None:
 
     assert not train_list.exists()
     assert not Path(normalized).exists()
+
+
+def test_checked_in_training_configs_do_not_bind_to_a_host_absolute_path() -> None:
+    project_root = Path(__file__).resolve().parents[1]
+    path_fields = {"data", "project", "weight_provenance"}
+    offenders: list[str] = []
+    for config_path in sorted((project_root / "configs").rglob("*.yaml")):
+        payload = yaml.safe_load(config_path.read_text(encoding="utf-8")) or {}
+        if not isinstance(payload, dict):
+            continue
+        for field in path_fields:
+            value = payload.get(field)
+            if not isinstance(value, str):
+                continue
+            if PureWindowsPath(value).is_absolute() or PurePosixPath(value).is_absolute():
+                offenders.append(f"{config_path.relative_to(project_root)}:{field}={value}")
+    assert offenders == []

@@ -9,6 +9,7 @@ from typing import Any
 from blade_defect.utils.device import resolve_device
 from blade_defect.utils.files import load_project_config, resolved_data_yaml
 from blade_defect.utils.paths import resolve_model_reference, resolve_path
+from blade_defect.models.performance import performance_callbacks
 
 
 def _load_yolo():
@@ -44,16 +45,18 @@ class SegmentationTrainer:
         Ultralytics 直接读取 ``configs/train.yaml`` 引用的原始数据集 YAML。
         """
         kwargs = {key: value for key, value in kwargs.items() if value is not None}
+        profile = kwargs.pop("pipeline_profile", False)
         kwargs["device"] = resolve_device(kwargs.get("device", "auto"))
         if isinstance(kwargs.get("project"), Path):
             kwargs["project"] = str(kwargs["project"])
         data = kwargs.pop("data", None)
-        if data is None:
-            return self.model.train(task="segment", **kwargs)
-        if not normalize_data_yaml:
-            return self.model.train(data=str(resolve_path(data)), task="segment", **kwargs)
-        with resolved_data_yaml(data) as normalized_data:
-            return self.model.train(data=normalized_data, task="segment", **kwargs)
+        with performance_callbacks(self.model, profile):
+            if data is None:
+                return self.model.train(task="segment", **kwargs)
+            if not normalize_data_yaml:
+                return self.model.train(data=str(resolve_path(data)), task="segment", **kwargs)
+            with resolved_data_yaml(data) as normalized_data:
+                return self.model.train(data=normalized_data, task="segment", **kwargs)
 
     def validate(
         self, data: str | Path, device: str | int | None = "auto", *,

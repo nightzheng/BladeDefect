@@ -15,10 +15,12 @@ from blade_defect.utils import resolve_model_reference, resolve_path, setup_logg
 from blade_defect.utils.files import save_json
 
 
-def _train(config: str | Path, device: str | None = None) -> Any:
+def _train(config: str | Path, device: str | None = None, workers: int | None = None) -> Any:
     trainer, kwargs = SegmentationTrainer.from_config(config)
     if device is not None:
         kwargs["device"] = device
+    if workers is not None:
+        kwargs["workers"] = workers
     return trainer.train(**kwargs)
 
 
@@ -37,6 +39,20 @@ def _ablation_experiment(name: str, params: dict[str, Any]) -> dict[str, Any]:
         device=params.get("device", "auto"),
     )
     return metrics_from_ultralytics(result).to_dict()
+
+
+def _nonnegative_int(value: str) -> int:
+    number = int(value)
+    if number < 0:
+        raise argparse.ArgumentTypeError("workers must be >= 0")
+    return number
+
+
+def _positive_int(value: str) -> int:
+    number = int(value)
+    if number <= 0:
+        raise argparse.ArgumentTypeError("batch must be > 0")
+    return number
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -85,6 +101,7 @@ def build_parser() -> argparse.ArgumentParser:
     train = subparsers.add_parser("train")
     train.add_argument("--config", default="configs/train.yaml", type=resolve_path)
     train.add_argument("--device", choices=("auto", "0", "cpu"), help="覆盖配置中的计算设备")
+    train.add_argument("--workers", type=_nonnegative_int, help="覆盖 DataLoader worker 数量")
 
     predict = subparsers.add_parser("predict")
     predict.add_argument("--model", "--weights", dest="model", required=True, type=resolve_model_reference)
@@ -111,6 +128,8 @@ def build_parser() -> argparse.ArgumentParser:
     run_all.add_argument("--runs-dir", default="runs", type=resolve_path)
     run_all.add_argument("--output", default="results/summary.csv", type=resolve_path)
     run_all.add_argument("--device", default="auto", choices=("auto", "0", "cpu"))
+    run_all.add_argument("--workers", type=_nonnegative_int, help="覆盖所有实验的 DataLoader worker 数量")
+    run_all.add_argument("--batch", type=_positive_int, help="显式覆盖所有目标实验的 batch；默认沿用注册表")
     run_all.add_argument(
         "--imgsz",
         type=int,
@@ -181,7 +200,7 @@ def main() -> None:
         )
         print(json.dumps(counts, ensure_ascii=False, indent=2))
     elif args.command == "train":
-        _train(args.config, args.device)
+        _train(args.config, args.device, args.workers)
     elif args.command == "predict":
         SegmentationPredictor(args.model).predict(
             args.source, conf=args.conf, imgsz=args.imgsz, device=args.device, save=True
@@ -200,6 +219,8 @@ def main() -> None:
             records = run_all_experiments(config=args.config, runs_dir=args.runs_dir,
                                           results_file=args.output, device=args.device,
                                           imgsz=args.imgsz,
+                                          workers=args.workers,
+                                          batch=args.batch,
                                           experiment_selectors=args.experiments)
             print(json.dumps(records, ensure_ascii=False, indent=2))
         elif args.experiment_command == "summary":

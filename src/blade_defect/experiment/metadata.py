@@ -291,7 +291,7 @@ def create_run_manifest(
         "model": str(model),
         "imgsz": experiment.get("imgsz"),
         "epochs": experiment.get("epochs"),
-        "batch": experiment.get("batch"),
+        "batch": effective_config.get("batch", experiment.get("batch")),
         "seed": experiment.get("seed"),
         "device": resolved_device,
         "requested_device": requested_device,

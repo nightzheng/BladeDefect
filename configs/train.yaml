@@ -6,6 +6,8 @@ imgsz: 640
 batch: 8
 device: auto
 workers: 4
+# 可选：pipeline_profile: true，记录轻量 epoch/host iteration 诊断，默认关闭。
+# 调优与独立 benchmark：docs/input_pipeline_audit.md
 project: runs/segment
 name: blade_yolo11n
 patience: 30

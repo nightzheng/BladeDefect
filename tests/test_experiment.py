@@ -99,8 +99,10 @@ def _build_minimal_dataset(root: Path) -> Path:
     return data
 
 
+@pytest.mark.parametrize("workers_override, expected_workers", [(None, 2), (8, 8)])
 def test_run_all_uses_original_dataset_yaml(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    workers_override: int | None, expected_workers: int,
 ) -> None:
     data = _build_minimal_dataset(tmp_path)
     config = tmp_path / "train.yaml"
@@ -125,13 +127,14 @@ def test_run_all_uses_original_dataset_yaml(
     runner_module.run_all_experiments(
         [experiment], config=config, runs_dir=tmp_path / "runs",
         results_file=tmp_path / "results" / "summary.csv", continue_on_error=False,
+        workers=workers_override,
     )
 
     train_call = next(payload for kind, payload in calls if kind == "train")
     validate_call = next(payload for kind, payload in calls if kind == "validate")
     assert train_call["data"] == data.resolve()
     assert train_call["normalize_data_yaml"] is False
-    assert train_call["workers"] == 2
+    assert train_call["workers"] == expected_workers
     assert validate_call["data"] == data.resolve()
     assert validate_call["normalize_data_yaml"] is False
     run_dir = tmp_path / "runs" / "exp_test"
@@ -141,8 +144,96 @@ def test_run_all_uses_original_dataset_yaml(
     assert manifest["status"] == "completed"
     assert manifest["dataset_id"] == "dataset"
     assert manifest["git"]["tags_exact"] == []
-    assert manifest["config"]["effective"]["workers"] == 2
+    assert manifest["config"]["effective"]["workers"] == expected_workers
     assert environment["python"]["version"]
+
+
+@pytest.mark.parametrize("batch_override, expected_batches", [(None, [8, 6]), (12, [12, 12])])
+def test_run_all_batch_priority_for_all_targets(tmp_path, monkeypatch, caplog,
+                                              batch_override, expected_batches):
+    data = _build_minimal_dataset(tmp_path)
+    config = tmp_path / "train.yaml"
+    config.write_text(f"data: {data.as_posix()}\nbatch: 20\nworkers: 4\nseed: 99\n")
+    calls = []
+
+    class FakeTrainer:
+        def __init__(self, model):
+            pass
+
+        def train(self, **kwargs):
+            calls.append(kwargs)
+            return SimpleNamespace(save_dir=Path(kwargs["project"]) / kwargs["name"])
+
+        def validate(self, data, **kwargs):
+            metrics = SimpleNamespace(p=0.8, r=0.7, map50=0.6, map=0.5)
+            return SimpleNamespace(seg=metrics, speed={"inference": 10.0})
+
+    monkeypatch.setattr(runner_module, "SegmentationTrainer", FakeTrainer)
+    experiments = [ExperimentConfig("batch_a", "model_a.pt", imgsz=960, batch=8),
+                   ExperimentConfig("batch_b", "model_b.pt", imgsz=1280, batch=6)]
+    with caplog.at_level("INFO", logger=runner_module.__name__):
+        records = runner_module.run_all_experiments(
+            experiments, config=config, runs_dir=tmp_path / "runs", device="cpu",
+            results_file=tmp_path / "summary.csv", continue_on_error=False,
+            batch=batch_override, workers=8,
+        )
+    assert [call["batch"] for call in calls] == expected_batches
+    assert [record["batch"] for record in records] == expected_batches
+    assert [call["workers"] for call in calls] == [8, 8]
+    assert [call["seed"] for call in calls] == [42, 42]
+    assert [call["imgsz"] for call in calls] == [960, 1280]
+    assert [exp.batch for exp in experiments] == [8, 6]
+    for experiment, expected_batch in zip(experiments, expected_batches):
+        manifest = json.loads((tmp_path / "runs" / experiment.name / "run_manifest.json").read_text())
+        metrics = json.loads((tmp_path / "runs" / experiment.name / "metrics.json").read_text())
+        assert manifest["batch"] == expected_batch
+        assert manifest["config"]["effective"]["batch"] == expected_batch
+        assert manifest["metrics"]["batch"] == expected_batch
+        assert metrics["batch"] == expected_batch
+        assert (f"{experiment.name} | effective batch={expected_batch} | effective workers=8 "
+                f"| imgsz={experiment.imgsz} | device=cpu") in caplog.text
+
+
+def test_run_all_cli_forwards_explicit_batch(monkeypatch):
+    import sys
+    from blade_defect import cli
+
+    calls = []
+    monkeypatch.setattr(cli, "run_all_experiments", lambda **kwargs: calls.append(kwargs) or [])
+    monkeypatch.setattr(cli, "setup_logging", lambda: None)
+    monkeypatch.setattr(sys, "argv", ["blade-defect", "experiment", "run-all", "--batch", "12"])
+    cli.main()
+    assert calls[0]["batch"] == 12
+    assert build_parser().parse_args(["experiment", "run-all"]).batch is None
+    for invalid in ("0", "-1", "0.5"):
+        with pytest.raises(SystemExit):
+            build_parser().parse_args(["experiment", "run-all", "--batch", invalid])
+
+
+@pytest.mark.parametrize("batch", [0, -1, True, 0.5])
+def test_run_all_api_rejects_invalid_batch_before_dataset_scan(tmp_path, monkeypatch, batch):
+    config = tmp_path / "train.yaml"
+    config.write_text("{}")
+    monkeypatch.setattr(runner_module, "validate_dataset_gate",
+                        lambda *_: pytest.fail("must validate batch before dataset scan"))
+    with pytest.raises(ValueError, match="batch must be a positive integer"):
+        runner_module.run_all_experiments(config=config, batch=batch)
+
+
+def test_train_uses_yaml_batch_and_cli_workers(tmp_path, monkeypatch):
+    from blade_defect import cli
+    from blade_defect.utils.files import load_project_config
+
+    source = tmp_path / "train.yaml"
+    source.write_text("batch: 12\nworkers: 4\nimgsz: 960\nseed: 42\n")
+    calls = []
+    trainer = SimpleNamespace(train=lambda **kwargs: calls.append(kwargs))
+    monkeypatch.setattr(cli, "SegmentationTrainer", SimpleNamespace(
+        from_config=lambda path: (trainer, load_project_config(path)[0])))
+    cli._train(source)
+    cli._train(source, device="cpu", workers=8)
+    assert calls[0]["batch"] == calls[1]["batch"] == 12
+    assert calls[0]["workers"] == 4 and calls[1]["workers"] == 8
 
 
 def test_run_manifest_records_training_failure(

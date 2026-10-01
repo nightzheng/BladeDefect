@@ -4,6 +4,7 @@ from __future__ import annotations
 import csv
 import hashlib
 import json
+import logging
 import platform
 from importlib.metadata import PackageNotFoundError, version
 import subprocess
@@ -42,6 +43,7 @@ from .registry import EXPERIMENTS
 
 # 兼容旧名称：门禁错误统一由 blade_defect.data.validation 提供。
 DatasetValidationError = DatasetGateError
+LOGGER = logging.getLogger(__name__)
 
 
 def _now_iso() -> str:
@@ -181,16 +183,25 @@ def run_all_experiments(
     device: str | int | None = "auto", continue_on_error: bool = True,
     imgsz: int | None = None,
     experiment_selectors: Iterable[str] | None = None,
+    workers: int | None = None,
+    batch: int | None = None,
 ) -> list[dict[str, Any]]:
     """使用同一份训练配置依次训练并评估筛选后的 baseline。
 
     训练前 strict 数据集门禁始终启用（支持目录型与 txt 清单型数据集），
     不再提供 ``--skip-validation`` 旁路。
+    batch/workers 优先级：显式覆盖 > 注册表 > YAML；省略覆盖时沿用旧行为。
     """
     selected_experiments = _select_experiments(experiments, imgsz, experiment_selectors)
     config_path = resolve_path(config)
     base_config, project_root = load_project_config(config_path)
     base_config.pop("model", None)
+    if workers is not None:
+        if isinstance(workers, bool) or not isinstance(workers, int) or workers < 0:
+            raise ValueError("workers must be a nonnegative integer")
+    if batch is not None:
+        if isinstance(batch, bool) or not isinstance(batch, int) or batch <= 0:
+            raise ValueError("batch must be a positive integer")
     data_path = resolve_path(base_config.get("data", "configs/data.yaml"), project_root)
     dataset_config = load_yaml(data_path)
     missing = [field for field in ("train", "val", "names") if field not in dataset_config]
@@ -215,6 +226,11 @@ def run_all_experiments(
             **base_config,
             **experiment.training_kwargs(data_path, output_root, device),
         }
+        # 显式 CLI/API 覆盖必须在注册表合并后应用；默认不改变历史实验定义。
+        if batch is not None:
+            train_kwargs["batch"] = batch
+        if workers is not None:
+            train_kwargs["workers"] = workers
         manifest_path = experiment_dir / "run_manifest.json"
         environment_path = experiment_dir / "environment.json"
         started_at = _now_iso()
@@ -226,6 +242,7 @@ def run_all_experiments(
             )
         base_record = {
             **experiment.to_dict(),
+            "batch": train_kwargs["batch"],
             "dataset_id": dataset_identity["dataset_id"],
             "code_commit": code_commit,
             "hardware": environment,
@@ -261,6 +278,12 @@ def run_all_experiments(
         }
         try:
             trainer = SegmentationTrainer(model)
+            LOGGER.info(
+                "%s | effective batch=%s | effective workers=%s | imgsz=%s | device=%s "
+                "(workers 为配置值，实际进程数受框架/设备限制)",
+                experiment.name, train_kwargs["batch"], train_kwargs.get("workers", 8),
+                train_kwargs["imgsz"], manifest["device"],
+            )
             train_result = trainer.train(normalize_data_yaml=False, **train_kwargs)
             save_dir = Path(getattr(train_result, "save_dir", None) or experiment_dir)
             # 优先评估训练得到的 best.pt；测试替身或中断场景下回退到原模型。

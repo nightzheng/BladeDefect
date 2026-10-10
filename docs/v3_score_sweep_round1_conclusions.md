@@ -6,11 +6,11 @@
 
 ## 0. 负责人必答题：模型是"看不见、分错类、还是框不准"？
 
-**答：压倒性瓶颈是"看不见"（漏检），其次是"框不准"，"分错类"占比最小但集中在特定类族。**
+**答：压倒性瓶颈是漏检（定义见下表注），其次是定位不准，分类错误占比最小但集中在特定类族。**
 
 全量 val 7,413 个 GT 实例的错误分解（占 GT 比例）：
 
-| 模型 | 看不见(漏检) | 框不准(0.5≤IoU<0.75) | 分错类 | ok(IoU≥0.75) | 误报 FP |
+| 模型 | 漏检（无匹配） | 定位偏差(0.5≤IoU<0.75) | 分错类 | ok(IoU≥0.75) | 误报 FP |
 |---|---|---|---|---|---|
 | SEG 基线 | 73.5% | 13.8% | 5.2% | 7.5% | 1512 |
 | exp1 SEG 960 | 68.3% | 17.1% | 6.5% | 8.1% | 2431 |
@@ -19,12 +19,14 @@
 | exp3 OBB 960 | 68.3% | 20.9% | 6.2% | 4.6% | 2679 |
 | exp4 OBB 1280 | 68.9% | 19.9% | 6.2% | 5.0% | **3835** |
 
-**结论：该数据集的硬伤是检出（recall 层面），不是分类。** 即便最好的组合也有 ~2/3 的缺陷实例完全没被看见。
+> 口径说明：上表"漏检"指 GT 实例在 conf=0.25 下没有任何 polygon IoU≥0.5 的匹配预测（未达匹配阈值）。其中一部分实例仍存在低置信度（conf<0.25）或低重叠（IoU<0.5）的预测响应，**并非字面意义的"模型完全看不见/无任何反应"**；三档桶（漏检/定位偏差/ok）按最佳匹配 IoU 互斥划分。
+
+**结论：该数据集的硬伤是检出（recall 层面），不是分类。** 即便最好的组合也有 ~2/3 的 GT 实例未达匹配阈值。
 任何"换参数提分"若不针对漏检，天花板都很低。
 
 ## 1. 瓶颈排序（本轮证据）
 
-1. **检出不足（看不见）**：全类平均漏检 66–74%；复核重灾区类 8/9/14 漏检 78–91%。2000 万像素图上小/细长目标在 960 输入下信息不足是主因之一。
+1. **检出不足（漏检，口径见 §0 表注）**：全类平均漏检 66–74%；复核重灾区类 8/9/14 漏检 78–91%。2000 万像素图上小/细长目标在 960 输入下信息不足是主因之一。
 2. **定位质量（框不准）**：0.5–0.75 IoU 区间的"半对"实例占 14–21%；OBB 侧更突出（基线即 18.2%）。这是 mAP50 与 mAP50-95 显著分离的来源（见 §3）。
 3. **少数类样本不足**：维修痕迹 val 66 实例（train 占比同样低）、结构损伤 val 25 实例/22 图。单类 AP 波动 ±0.05 是常态（bootstrap CI 跨零），指标层面几乎不可判决。
 4. **类别混淆（分错类）**：总量小（5–7%）但高度集中于**腐蚀族互混**（类 1/2/3/6 互判）与**裂纹族互混**（胶衣裂纹↔后缘弦向裂纹↔玻纤裂纹）、**附件族**（11↔12）。属标注边界/视觉相似性问题，非训练参数问题。
@@ -76,9 +78,12 @@ exp1→exp2 同时变更了 **6 个变量**，分辨率只是其一：
 结论：纯 CPU 解码瓶颈；workers 8→12/16 的边际收益待下次正式训练顺便做受控对比（不单独开机）。
 原始记录：`results/v3_score_sweep/benchmark_8c_*.log`、`stage1_monitor.log`。
 
+> 配置口径（负责人评审意见 2026-10-10）：两份封存基线 YAML 保持 `workers: 4` 原样不改（与基线训练时实际配置一致，保证历史可复现）；workers=8 仅作为运行参数经 CLI `--workers 8` 覆盖生效（机制见 `docs/input_pipeline_audit.md`），或写入后续新实验配置，不回写封存基线。
+
 ## 5. 产物索引
 
-- 本分析原始数据：`results/v3_score_sweep/review/error_decomposition.json`（脚本 `/root/decompose_errors.py`）
+- 最小可核验结果汇总（已入 Git）：`docs/v3_score_sweep_stage1_summary.csv`（各实验主指标/FPS/判定）、`docs/v3_score_sweep_metrics_comparison.md`（val 全指标对比，best epoch 权重）
+- 本分析原始数据：`results/v3_score_sweep/review/error_decomposition.json`（脚本 `decompose_errors.py`；按红线 results 不入 Git，随服务器 /data/backup 归档封存，复现时可从归档提取）
 - 全量预测 JSON ×6：`runs/*/validation_predictions.json` + `results/v3_score_sweep/review/baseline_*_validation_predictions.json`
 - 复核包与往返记录：`results/v3_score_sweep/review/review_package_v2_for_zhangjinyan.zip`（内含 noise_analysis.md、val_membership_proof.md 等）
 - 周报：`docs/weekly_report_v3_score_sweep.md`（commit dd9d56d）

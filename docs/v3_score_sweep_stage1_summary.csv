@@ -1,0 +1,9 @@
+﻿task,experiment_id,kind,stage,status,primary_metric,primary_value,delta_vs_baseline,fps,fps_drop_ratio,worst_class_delta,regressed_class_count,regressed_classes,auto_decision,run_dir
+obb,v3_yolo11s_obb_960_e200,baseline,0,stopped_early,box_mAP50-95,0.1733447994623364,0.0,300.1637636968668,0.0,0.0,0,,reference,/data/runs/v3_yolo11s_obb_960_e200
+obb,v3_obb_ft_cos_adamw_960_e30,experiment,1,ok,box_mAP50-95,0.16224670046767636,-0.01109809899466005,228.77538388524383,0.2378314388532174,-0.03627616880136063,3,叶片损伤--玻纤损伤; 叶片损伤--结构损伤; 表面裂纹--玻纤裂纹,reject_or_rework,/root/BladeDefect/runs/v3_obb_ft_cos_adamw_960_e30
+obb,v3_obb_ft_smallobj_1280_e25,experiment,1,ok,box_mAP50-95,0.152316400364839,-0.021028399097497402,133.58830543660582,0.5549485927571335,-0.08361254038923205,7,维修痕迹; 表面缺陷--表面掉漆; 表面缺陷--表面油污; 表面腐蚀--保护膜损伤; 表面腐蚀--合模缝裸漏; 表面腐蚀--玻纤腐蚀; 表面腐蚀--胶衣腐蚀,reject_or_rework,/root/BladeDefect/runs/v3_obb_ft_smallobj_1280_e25
+obb,v3_obb_ft_rotation_960_e30,experiment,2,not_started,box_mAP50-95,,,,,,,,pending,/root/BladeDefect/runs/v3_obb_ft_rotation_960_e30
+seg,v3_yolo11s_seg_960_e200,baseline,0,stopped_early,mask_mAP50-95,0.10455308512314222,0.0,232.95175060475404,0.0,0.0,0,,reference,/data/runs/v3_yolo11s_seg_960_e200
+seg,v3_seg_ft_smallobj_1280_e25,experiment,1,ok,mask_mAP50-95,0.10225088442284014,-0.0023022007003020845,106.08210418264413,0.5446176991276097,-0.054777649674438586,1,维修痕迹,reject_or_rework,/root/BladeDefect/runs/v3_seg_ft_smallobj_1280_e25
+seg,v3_seg_ft_cos_adamw_960_e30,experiment,1,ok,mask_mAP50-95,0.09854924725743283,-0.006003837865709391,167.9044718418521,0.27923069302564185,-0.016105273581566326,0,,reject_or_rework,/root/BladeDefect/runs/v3_seg_ft_cos_adamw_960_e30
+seg,v3_seg_ft_aug_960_e30,experiment,2,not_started,mask_mAP50-95,,,,,,,,pending,/root/BladeDefect/runs/v3_seg_ft_aug_960_e30

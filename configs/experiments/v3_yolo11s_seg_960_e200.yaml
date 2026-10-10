@@ -5,7 +5,9 @@ epochs: 200
 imgsz: 960
 batch: 8
 device: auto
-workers: 4
+# 2026-09-30 联合确认：workers 4→8，纯数据加载吞吐调整，不影响训练口径与结果。
+# 依据：V100 节点 GPU 利用率仅 5–48%（iowait 23%），4 workers 读盘+解码+mosaic 供不上。
+workers: 8
 project: runs
 name: v3_yolo11s_seg_960_e200
 patience: 0

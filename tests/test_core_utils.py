@@ -24,6 +24,17 @@ def test_explicit_device(value: str | int, expected: str | int) -> None:
     assert resolve_device(value) == expected
 
 
+@pytest.mark.parametrize(("value", "expected"), [(1, 1), ("1", 1), ("cuda:1", 1), (2, 2)])
+def test_multi_gpu_device_index(value: str | int, expected: int) -> None:
+    assert resolve_device(value) == expected
+
+
+@pytest.mark.parametrize("value", ["0,1", "gpu", "cuda:x", "-1", "1.5"])
+def test_invalid_device_rejected(value: str) -> None:
+    with pytest.raises(ValueError):
+        resolve_device(value)
+
+
 def test_relative_path_resolves_against_base(tmp_path: Path) -> None:
     assert resolve_path("datasets/images", tmp_path) == (tmp_path / "datasets" / "images").resolve()
 

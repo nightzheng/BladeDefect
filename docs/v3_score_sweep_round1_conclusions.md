@@ -83,7 +83,8 @@ exp1→exp2 同时变更了 **6 个变量**，分辨率只是其一：
 ## 5. 产物索引
 
 - 最小可核验结果汇总（已入 Git）：`docs/v3_score_sweep_stage1_summary.csv`（各实验主指标/FPS/判定）、`docs/v3_score_sweep_metrics_comparison.md`（val 全指标对比，best epoch 权重）
-- 本分析原始数据：`results/v3_score_sweep/review/error_decomposition.json`（脚本 `decompose_errors.py`；按红线 results 不入 Git，随服务器 /data/backup 归档封存，复现时可从归档提取）
+- 本分析脚本（已入 Git）：`scripts/decompose_val_errors.py`（用法见文件 docstring；输入为 `runs/*/validation_predictions.json` 导出）
+- 本分析原始数据：`results/v3_score_sweep/review/error_decomposition.json`（按红线 results 不入 Git，随服务器 /data/backup 归档封存，复现时用上述脚本对预测导出重跑即可再生）
 - 全量预测 JSON ×6：`runs/*/validation_predictions.json` + `results/v3_score_sweep/review/baseline_*_validation_predictions.json`
 - 复核包与往返记录：`results/v3_score_sweep/review/review_package_v2_for_zhangjinyan.zip`（内含 noise_analysis.md、val_membership_proof.md 等）
 - 周报：`docs/weekly_report_v3_score_sweep.md`（commit dd9d56d）

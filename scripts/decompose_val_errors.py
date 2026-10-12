@@ -10,6 +10,10 @@
                     不代表模型完全无响应——评审意见 2026-10-10）
 另统计 false_positive（无任何 GT 匹配的预测）。
 口径为近似分析，非官方 AP；官方指标以 metrics.json 为准。
+保留归档边界口径：缺失/空几何不参与统计；零面积 GT 不进入分母，
+有几何字段但零面积的预测计 FP；自交 polygon 沿用 buffer(0) 修复。
+坐标格式错误、少于三点或非有限坐标明确报错，避免静默生成不完整统计。
+无有效 GT 时摘要百分比显示 N/A，仍输出 JSON（含 FP）。
 
 用法：
   python scripts/decompose_val_errors.py out.json seg=runs/exp/validation_predictions.json obb=...
@@ -21,6 +25,7 @@ from __future__ import annotations
 import argparse
 import json
 from collections import Counter, defaultdict
+from math import isfinite
 from pathlib import Path
 
 from shapely.geometry import Polygon
@@ -30,12 +35,23 @@ IOU_GOOD = 0.75
 
 
 def _poly(points, w=1.0, h=1.0, normalized=False):
-    if points and isinstance(points[0], (list, tuple)):
-        pts = [(float(p[0]), float(p[1])) for p in points]
-    else:
-        pts = [(float(points[i]), float(points[i + 1])) for i in range(0, len(points), 2)]
+    if not points:
+        return Polygon()
+    try:
+        if isinstance(points[0], (list, tuple)):
+            if any(len(p) != 2 for p in points):
+                raise ValueError("expected coordinate pairs")
+            pts = [(float(p[0]), float(p[1])) for p in points]
+        else:
+            if len(points) % 2:
+                raise ValueError("expected an even coordinate count")
+            pts = [(float(points[i]), float(points[i + 1])) for i in range(0, len(points), 2)]
+    except (TypeError, ValueError, IndexError) as exc:
+        raise ValueError("Invalid polygon: expected numeric x/y coordinate pairs") from exc
     if normalized:
         pts = [(x * w, y * h) for x, y in pts]
+    if len(pts) < 3 or not all(isfinite(x) and isfinite(y) for x, y in pts):
+        raise ValueError("Invalid polygon: expected at least three points with finite coordinates")
     p = Polygon(pts)
     return p if p.is_valid else p.buffer(0)
 
@@ -107,11 +123,15 @@ def main() -> None:
         for v in result["per_class"].values():
             tot.update(v)
         n = sum(tot.values())
+        rates = {
+            key: f"{tot[key]/n:.1%}" if n else "N/A"
+            for key in ("missed", "misclassified", "mislocalized", "ok")
+        }
         print(
-            f"{name}: GT={n} 未达阈值(missed)={tot['missed']}({tot['missed']/n:.1%}) "
-            f"误分类={tot['misclassified']}({tot['misclassified']/n:.1%}) "
-            f"定位偏差={tot['mislocalized']}({tot['mislocalized']/n:.1%}) "
-            f"ok={tot['ok']}({tot['ok']/n:.1%})",
+            f"{name}: GT={n} 未达阈值(missed)={tot['missed']}({rates['missed']}) "
+            f"误分类={tot['misclassified']}({rates['misclassified']}) "
+            f"定位偏差={tot['mislocalized']}({rates['mislocalized']}) "
+            f"ok={tot['ok']}({rates['ok']})",
             flush=True,
         )
     args.output.parent.mkdir(parents=True, exist_ok=True)

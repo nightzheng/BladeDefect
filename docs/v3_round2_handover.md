@@ -7,14 +7,20 @@
 
 ## 一、前任需交付给接手人的东西
 
-### 1. 访问权限与资源
-- **阿里云控制台**：杭州 I 区操作权限（新建抢占式实例、从快照创建云盘、绑定 EIP）；RAM 角色 `belong-temp`（OSS 只读）
-- **数据盘快照 ID**：【前任填写快照 ID】← 接手人第一步要用它创建数据盘
-- **OSS**：bucket `belong-temp`（数据原件 + 封存基线归档，只读）
-- **GitHub**：仓库 `nightzheng/BladeDefect` 读写权限；PR #1（https://github.com/nightzheng/BladeDefect/pull/1 ）
-- **沟通渠道**：项目群 + 负责人 + 复核人（第二方复核传统需延续）
+> 账号原则：B（接手人）**全部使用自建账号**，前任不提供任何账号密码。仅有两项控制台操作必须前任本人完成（见 §1.0），其余均通过文件/仓库交付。
 
-### 2. 必读文档（按顺序读）
+### 1.0 仅前任能完成的两项控制台操作（各 5 分钟）
+1. **共享数据盘快照给 B 的阿里云账号**：ECS 控制台 → 快照 → 选中数据盘快照 → "共享快照" → 填 B 的阿里云账号 ID（UID）。B 接受后即可在自己账号下从该快照创建云盘。（备选：改为授权 OSS bucket `belong-temp` 只读给 B 的账号，B 从 OSS 拉数据，但 193G 传输慢，优先快照共享）
+2. **邀请 B 为 GitHub 仓库协作者**：仓库 Settings → Collaborators → Add people → 填 B 的 GitHub 用户名。仓库本身公开可读，B 未接受邀请前也能 clone，受邀后才有 push 权限。
+
+### 1.1 B 需自行准备的账号
+- 阿里云账号（实名认证，可开抢占式实例；杭州 I 区有操作权限即可）
+- GitHub 账号（接受协作者邀请后获得 push 权限）
+
+### 1.2 前任直接发送的文件
+- `v3_round2_handover.md`（本文档）——先读这个，拿到仓库权限后其余文档全在仓库里
+
+### 2. 必读文档（按顺序读，均在仓库 `experiments/v3-score-sweep` 分支）
 | 顺序 | 文档 | 作用 |
 |---|---|---|
 | 1 | `docs/v3_next_round_proposals.md` | 方案 A 全部设计 + **开机前核对清单**（变量受控表/判定标准/预算上限） |
@@ -37,8 +43,8 @@
 - 与第二方复核人约定复核节点（结果出来后）
 
 ### 第 1 步：重建环境（~1 小时，全部为按手册操作）
-1. 控制台新建抢占式实例：**杭州 I 区，16 vCPU + 2×Tesla V100 16G（gn6v-c8g1.4xlarge）**，镜像按 DISASTER_RECOVERY.md 指定；绑定新 EIP
-2. **从数据盘快照创建 ESSD 云盘**（500G），挂载到实例并 `mount` 到 `/data`，写入 `/etc/fstab`
+1. 在 **B 自己的阿里云账号**下接受前任共享的数据盘快照（控制台 → 快照 → 共享给我的）；新建抢占式实例：**杭州 I 区，16 vCPU + 2×V100 16G（gn6v-c8g1.4xlarge）**，镜像按 DISASTER_RECOVERY.md 指定；绑定新 EIP
+2. **从共享快照创建 ESSD 云盘**（500G），挂载到实例并 `mount` 到 `/data`，写入 `/etc/fstab`
 3. 按 `/data/backup/system_rebuild/DISASTER_RECOVERY.md` 七步重建系统环境（conda env、pip 依赖以 `pip_freeze.txt` 为准）
 4. 核验：
 ```bash

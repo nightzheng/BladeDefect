@@ -1,0 +1,18 @@
+﻿section,metric,a0_960,a1_1280,delta,note
+official,mask_mAP50-95,0.094444,0.101998,+0.007554,判据③ Δ≥-0.002 通过
+official,mask_mAP50,0.234716,0.259531,+0.024815,
+official,mask_recall,0.312061,0.328761,+0.016700,
+official,mask_precision,0.340475,0.364675,+0.024200,
+official,box_mAP50-95,0.141562,0.155068,+0.013506,
+official,fps_ultralytics_val,184.854,107.251,-0.419776,FPS 降 42.0%；三条判据不含速度
+official,stopped_epoch,23,22,-,patience=8 正常早停
+decompose,gt_instances,7413,7413,0,conf=0.25 polygon IoU>=0.5 匹配
+decompose,missed,5239(70.7%),4964(67.0%),-3.7pt,判据② Δ≤-3pt 通过
+decompose,mislocalized,1133(15.3%),1240(16.7%),+1.4pt,
+decompose,misclassified,467(6.3%),485(6.5%),+0.2pt,
+decompose,ok,574(7.7%),724(9.8%),+2.1pt,
+decompose,false_positive,2144,2097,-47,
+criterion,①类8/9/14_AP50-95(M)_Δ全正,+,+,PASS,+0.0107/+0.0126/+0.0192
+criterion,②总漏检率_Δ≤-3pt,-3.7pt,-3.7pt,PASS,70.7%->67.0%
+criterion,③总mAP50-95(M)_Δ≥-0.002,+0.007554,+0.007554,PASS,0.09444->0.10200
+verdict,三条全过,分辨率有效,,,按开机前写死标准判定未做任何临时修改

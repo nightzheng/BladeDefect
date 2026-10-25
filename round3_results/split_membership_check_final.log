@@ -1,0 +1,14 @@
+train.txt 条目 33804 条（splitlines 口径）
+val.txt   条目 7244 条（splitlines 口径）
+含空格的索引条目 11 条（用 str.split() 会被拆段，导致总数虚高）
+manifest 记录 345 条
+
+违规记录数（src/dst 不在 train 索引，或任一在 val 索引）: 0
+
+物理路径含 /images/val/ 的源图：14 张
+物理路径含 /images/val/ 的目标图：24 张（被选中 24 次）
+这些源图是否全在 train 索引：True
+这些目标图是否全在 train 索引：True
+这些源图/目标图是否有任何一条在 val 索引：False
+
+结论：违规 0 条，split 归属成立

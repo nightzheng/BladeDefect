@@ -63,6 +63,77 @@ tasks:
           scale: 0.5
           close_mosaic: 10
           patience: 10
+      - id: v3_seg_a0_res960_ft_e25
+        stage: 1
+        hypothesis: 分辨率隔离控制臂：imgsz=960，除 imgsz 外与 A1 完全一致
+        overrides:
+          imgsz: 960
+          epochs: 25
+          batch: 4
+          optimizer: AdamW
+          lr0: 0.0005
+          lrf: 0.01
+          cos_lr: true
+          warmup_epochs: 2
+          weight_decay: 0.0005
+          mosaic: 1.0
+          close_mosaic: 10
+          copy_paste: 0.0
+          patience: 8
+          seed: 42
+          workers: 8
+      - id: v3_seg_a1_res1280_ft_e25
+        stage: 1
+        hypothesis: 分辨率隔离实验臂：仅 imgsz=1280，其余与 A0 完全一致
+        overrides:
+          imgsz: 1280
+          epochs: 25
+          batch: 4
+          optimizer: AdamW
+          lr0: 0.0005
+          lrf: 0.01
+          cos_lr: true
+          warmup_epochs: 2
+          weight_decay: 0.0005
+          mosaic: 1.0
+          close_mosaic: 10
+          copy_paste: 0.0
+          patience: 8
+          seed: 42
+          workers: 8
+      # ── 方案 B：类 10/13/14 定向 copy-paste（Round 3）──────────────────────
+      # 前置（缺一不可，否则 preflight 会直接报 data 不存在）：
+      #   1. 先跑脚本生成派生数据集：
+      #      python scripts/build_class_copy_paste.py --data-yaml <原 data.yaml> \
+      #        --out-dir /data/datasets/derived/blade-v3-grouped-202608-cp10_13_14 \
+      #        --classes 10,13,14 --copies 3
+      #   2. 派生数据集的 val 指回原 val（不泄漏），合成样本只进 train
+      # 对照臂 = v3_seg_a0_res960_ft_e25（除 copy-paste 外参数完全一致）
+      # 判据（开机前写死，事后不得改）：
+      #   ① 类 10/13/14 的 recall Δ 全为正
+      #   ② 三类合计漏检率 Δ ≤ -3pt
+      #   ③ 总 mAP50-95(M) Δ ≥ -0.002
+      #   附加：类 10 单独结论仅作参考不作通过条件（66 实例，列为标注审计重点观察项）
+      - id: v3_seg_cp_class13_960_e25
+        stage: 1
+        hypothesis: 对类 13 定向 copy-paste 过采样，可在不损害其他类的前提下提升类 13 recall 并降低其漏检率
+        overrides:
+          data: /data/datasets/derived/blade-v3-grouped-202608-b1cp13/data.yaml
+          imgsz: 960
+          epochs: 25
+          batch: 4
+          optimizer: AdamW
+          lr0: 0.0005
+          lrf: 0.01
+          cos_lr: true
+          warmup_epochs: 2
+          weight_decay: 0.0005
+          mosaic: 1.0
+          close_mosaic: 10
+          copy_paste: 0.0
+          patience: 8
+          seed: 42
+          workers: 8
 
   obb:
     baseline_run: runs/v3_yolo11s_obb_960_e200

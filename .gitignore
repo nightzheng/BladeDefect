@@ -234,3 +234,13 @@ labels_backup_*/
 .vscode/
 .DS_Store
 Thumbs.db
+
+# 本地复核产物（zip 复核包、jpg 图版、178KB copy_paste manifest 等）：不上传
+_audit_preview/
+_artifacts_local/
+
+# 误生成的空壳文件（沙箱删除受限，保留在本地）
+docs/v3_round2_per_class.css
+
+# round3_results 里的核验日志需要入库（*.log 默认被忽略）
+!round3_results/*.log

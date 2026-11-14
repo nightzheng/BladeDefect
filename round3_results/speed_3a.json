@@ -1,0 +1,61 @@
+{
+  "threshold_fps": 150.0,
+  "measurements": {
+    "a1_1280_fp32": {
+      "weights": "/data/runs/v3_seg_a1_res1280_ft_e25/weights/best.pt",
+      "imgsz": 1280,
+      "half": false,
+      "inference_ms": 9.863,
+      "fps": 101.39,
+      "mask_mAP50-95": 0.102
+    },
+    "a1_1280_fp16": {
+      "weights": "/data/runs/v3_seg_a1_res1280_ft_e25/weights/best.pt",
+      "imgsz": 1280,
+      "half": true,
+      "inference_ms": 6.064,
+      "fps": 164.9,
+      "mask_mAP50-95": 0.1023
+    },
+    "a0_960_fp32": {
+      "weights": "/data/runs/v3_seg_a0_res960_ft_e25/weights/best.pt",
+      "imgsz": 960,
+      "half": false,
+      "inference_ms": 6.323,
+      "fps": 158.16,
+      "mask_mAP50-95": 0.09445
+    },
+    "a0_960_fp16": {
+      "weights": "/data/runs/v3_seg_a0_res960_ft_e25/weights/best.pt",
+      "imgsz": 960,
+      "half": true,
+      "inference_ms": 5.783,
+      "fps": 172.93,
+      "mask_mAP50-95": 0.09479
+    }
+  },
+  "errors": {
+    "trt": "TypeError: pybind11::init(): factory function returned nullptr"
+  },
+  "tiered_policy": {
+    "fp32_1280_share_0.1": 149.77,
+    "fp16_1280_share_0.1": 158.81,
+    "fp32_1280_share_0.2": 142.23,
+    "fp16_1280_share_0.2": 159.46,
+    "fp32_1280_share_0.3": 135.41,
+    "fp16_1280_share_0.3": 160.12,
+    "fp32_1280_share_0.5": 123.57,
+    "fp16_1280_share_0.5": 161.46,
+    "fp32_1280_share_1.0": 101.39,
+    "fp16_1280_share_1.0": 164.9
+  },
+  "best_config": {
+    "name": "a0_960_fp16",
+    "fps": 172.93
+  },
+  "go_no_go": {
+    "threshold": 150.0,
+    "best_fps": 172.93,
+    "verdict": "GO（进入 3b）"
+  }
+}

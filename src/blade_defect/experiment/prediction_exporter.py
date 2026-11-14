@@ -64,8 +64,12 @@ def _val_image_entries(data_config: dict[str, Any]) -> list[tuple[Path, Path]]:
     if val_path.is_file() and val_path.suffix.lower() == ".txt":
         # txt 清单型：图片/标签可位于 dataset_root 之外（如 v3 grouped 复用
         # blade-v2 实体文件），标签逐张按 images→labels 约定推导。
+        # 条目基准是 **val.txt 自己所在的目录**，不是 data.yaml 的 path：
+        # 派生数据集（如 blade-v3-grouped-202608-b1cp13）的 val 指回原数据集，
+        # 若按 dataset_root 解析会拼成 derived/blade-v2/... 而全数找不到（2026-10-24 踩过）。
+        index_base = val_path.parent
         images = [
-            _resolve_index_entry(dataset_root, line.strip())
+            _resolve_index_entry(index_base, line.strip())
             for line in val_path.read_text(encoding="utf-8").splitlines()
             if line.strip()
         ]
